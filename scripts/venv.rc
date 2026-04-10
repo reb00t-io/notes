@@ -1,0 +1,14 @@
+# use this file to initialize the virtual env
+# usage: source venv.rc
+
+venv=./.venv
+
+# create the venv if not yet there
+if [ ! -d "$venv" ]; then
+  uv venv --python '3.13' "$venv"
+fi
+
+source $venv/bin/activate
+
+# Install the project with dev extras
+uv pip install -e '.[dev]'
