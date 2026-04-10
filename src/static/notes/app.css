@@ -72,7 +72,12 @@ a:hover { text-decoration: underline; }
 .app {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  /* svh = "small viewport height": the smallest the viewport gets, never
+     covered by mobile browser chrome (URL bar, nav buttons). Using dvh
+     here fails on some iOS Safari layouts where the composer ends up
+     rendered behind the bottom URL bar. svh trades a few pixels of
+     headroom when the URL bar auto-hides for reliable bottom-anchoring. */
+  height: 100svh;
   max-width: 760px;
   margin: 0 auto;
   position: relative;
@@ -89,6 +94,14 @@ a:hover { text-decoration: underline; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* When the page-view sheet is open, the sheet has its own header (back +
+   title + edit), so the main app topbar would just duplicate it. Hide the
+   topbar; the sheet header picks up the safe-area-inset-top padding
+   (see .sheet-header below) so we don't lose the status-bar clearance. */
+.app:has(.sheet[aria-hidden="false"]) .topbar {
+  display: none;
 }
 
 /* ─── Top bar ───────────────────────────────────────────────── */
@@ -672,7 +685,9 @@ a:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 10px 10px;
+  /* When visible, the sheet header is the ONLY header (the app topbar is
+     hidden via :has), so it absorbs the status-bar safe-area clearance. */
+  padding: calc(var(--safe-top) + 10px) 10px 10px;
   background: rgba(11,11,20,0.72);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);

@@ -243,13 +243,13 @@ async function openPage(pageId) {
   sheetMeta.textContent = cached?.tags?.length ? cached.tags.join(' · ') : '';
   sheetFrame.src = api.pageRawUrl(pageId);
   sheet.setAttribute('aria-hidden', 'false');
-  topbarTitle.textContent = cached?.title || pageId;
+  // Topbar is hidden via CSS :has(.sheet[aria-hidden="false"]) when the
+  // sheet is open — no JS title mutation needed.
 }
 
 function closePage() {
   sheet.setAttribute('aria-hidden', 'true');
   state.openPageId = null;
-  topbarTitle.textContent = 'Notes';
 }
 
 // ─── Voice input ────────────────────────────────────────────

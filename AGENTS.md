@@ -93,6 +93,11 @@ tests. Do not push without a successful deploy.
   passwordless `sudo` is required on the deploy host.
 - The Docker image runs with `NOTES_EDITOR=mock` (no `claude` CLI in the
   container). Real Claude Code edits only work in local dev.
+- **Never pass `SKIP_DOCKER_BUILD=1` to `deploy.sh`.** `e2e.sh` builds a
+  native-arch image (arm64 on Apple Silicon) for speed, but the remote
+  host is linux/amd64. `deploy.sh` *must* rebuild with `--platform
+  linux/amd64`, otherwise the remote crashes with `exec format error`.
+  The build step is ~20s; always let it run.
 
 ## 5. Code Style & Conventions (Repo-Specific)
 Only list conventions that are easy to get wrong.
