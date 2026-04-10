@@ -7,28 +7,33 @@ name = "notes"
 version = "0.1.0"
 description = "TODO."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 license = { text = "MIT" }
 authors = [{ name = "Marko Rosenmüller" }]
 keywords = []
 dependencies = [
+  "aiohttp>=3.11",
+  "beautifulsoup4>=4.12",
+  "quart>=0.20",
+  "uvicorn==0.40.0",
+  "httpx>=0.28",
 ]
 
 [project.scripts]
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
-where = ["src"]
+include = ["src*"]
 exclude = ["tests*", "docs*"]
 
 [project.optional-dependencies]
 dev = [
+  "prompt-toolkit>=3.0",
   "pytest>=8.2",
-  "pytest-asyncio>=0.25",
+  "pytest-asyncio>=0.24",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
+asyncio_mode = "auto"
