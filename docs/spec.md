@@ -59,11 +59,37 @@ An **edit** is a structured change to one or more pages, authored by the agent i
 
 The agent does not regenerate pages from scratch on every edit. It reads the page, plans a structural change, and emits a minimal patch. See §4.2.
 
-### 2.3 The corpus
+### 2.3 Data
 
-The user's full set of pages is the **corpus**. Every user instruction is answered with the corpus in mind, via a retrieval layer (§4.5). The corpus is the user's database; the agent is the query engine.
+A page may reference **structured data** (CSV, JSON, and small binary files like images). Data lives **on the backend, next to the page it belongs to**, not as opaque uploads in a global blob store. This keeps a page + its data movable, inspectable, and versionable as one unit.
 
-### 2.4 The agent
+**Layout.** For a page `pages/<slug>.html`, data files live in a sibling directory `pages/<slug>.data/`. The directory is only created when a page actually has data attached to it.
+
+```
+pages/
+  sales-review.html
+  sales-review.data/
+    q1.csv
+    q2.csv
+    targets.json
+```
+
+**Reference pattern.** Pages reference their data via same-origin URLs: `/v1/pages/<slug>/data/<file>`. The HTML can `fetch()` them from inline scripts without any cross-origin setup, and the agent can inspect or rewrite those references with normal HTML edits.
+
+**Visualisations are code.** There is no "chart block" primitive. When the user wants a visualisation, the agent writes HTML + a small inline script that fetches the data and renders it (vanilla `<canvas>`, or an inlined reference to a CDN library like Chart.js or D3 if the user prefers). The visualisation is *part of the page*, versioned with it, and the agent can iterate on it like any other HTML section.
+
+**Agent tools for data:** `list_data(page_id)`, `read_data(page_id, file)`, `write_data(page_id, file, content)`, `delete_data(page_id, file)`. Writes are committed to git along with the HTML change that references them, in the same atomic edit (§2.2).
+
+**Scope limits.**
+- Data files are per-page. There is no shared / global data store in v1. If the user wants a file referenced from two pages, it lives on one page and the other page links to it.
+- Size cap per file: 10 MB. Larger binaries are rejected; this is a note-taking app, not a file host.
+- Binary types allowed: images (png/jpg/webp/svg), csv, json, txt, md. Everything else is rejected at the `write_data` boundary.
+
+### 2.4 The corpus
+
+The user's full set of pages (plus their data files) is the **corpus**. Every user instruction is answered with the corpus in mind, via a retrieval layer (§4.5). The corpus is the user's database; the agent is the query engine.
+
+### 2.5 The agent
 
 There is **exactly one agent**. It is neither a "user-mode helper" nor a full "dev-mode" code editor — it sits in the middle: a streaming, tool-using LLM whose job is to do *page-level dev work* on the user's behalf. Its scope is the **content layer**, not the core system.
 
@@ -179,41 +205,47 @@ There is no separate "editor" surface in v1. Direct editing happens inline on th
 
 This is the hardest part of the system and deserves the most care.
 
-**Principle:** the agent operates on a *semantic tree*, not raw HTML. Pages are parsed into a tree of sections, each with a stable `data-section-id`. The agent's edit tools take section IDs as targets.
+**Two-tier architecture.** There are two LLMs working together:
 
-**Tool surface (initial):**
+1. The **orchestrator agent** (the streaming LLM behind `/v1/responses`, using the existing `LLM_BASE_URL`). It handles the conversation, decides which page is relevant, performs search and retrieval, manages data files, and formulates an *edit instruction* in natural language.
+2. **Claude Code** (invoked as a subprocess) does the actual HTML modification. The orchestrator hands it the page file and the instruction; Claude Code reads, edits, and writes the file. See §4.9 for the wrapper.
+
+The orchestrator never edits HTML directly. It never writes raw HTML into a tool call. The only way a page changes is through a Claude Code invocation. This separation matters: Claude Code is much better at HTML edits than a general-purpose LLM with tool calls, and it can leverage the file's structure, conventions, and existing content when making changes.
+
+**Principle for indexing:** even though Claude Code produces free-form HTML diffs, the system still parses pages into a *semantic tree* of sections with stable `data-section-id` attributes. That tree exists for **search indexing** (§4.5) and **direct-edit anchoring** (§3.4) — not as a constraint on the edit operation. Section IDs survive edits because the parser re-assigns them deterministically from heading text + position; if a section's content changes but its heading stays, its ID stays.
+
+**Orchestrator tool surface:**
 
 | Tool | Purpose |
 |---|---|
-| `list_pages(query?, limit?)` | Browse / filter pages by title or tag |
-| `read_page(id)` | Return page HTML + section index |
-| `search(query, k?)` | Hybrid keyword + semantic search across the corpus, returns snippets |
-| `create_page(title, html, tags?)` | New page; agent provides initial HTML |
-| `edit_section(page_id, section_id, action, content)` | `action ∈ {replace, append_after, prepend_before, delete}` |
-| `add_section(page_id, after_section_id?, html)` | Insert a new top-level section |
-| `rename_section(page_id, section_id, new_heading)` | Cosmetic restructure |
-| `link_pages(from_id, to_id, anchor_text)` | Create a backlink-aware reference |
+| `list_pages(query?, tag?, limit?)` | Browse / filter pages by title or tag |
+| `read_page(id)` | Return page HTML + section index + data file list |
+| `search(query, k?, page_id?)` | Hybrid BM25+vector search across the corpus, returns snippets |
+| `create_page(title, initial_instruction, tags?)` | New page; Claude Code writes the initial HTML from the instruction |
+| `edit_page(page_id, instruction, context?)` | The primary edit tool: invokes Claude Code against the page with a natural-language instruction |
+| `delete_page(page_id)` | Remove a page (and its data dir) |
+| `list_data(page_id)` | List data files attached to a page |
+| `read_data(page_id, file)` | Return the contents of a data file (text) or a base64 blob (binary) |
+| `write_data(page_id, file, content)` | Create or overwrite a data file; committed atomically with the next HTML edit that references it |
+| `delete_data(page_id, file)` | Remove a data file |
 | `get_recent_edits(limit?)` | Audit / context for follow-up instructions |
 | `dom_query(selector)` | Read elements from the rendered page in the user's browser (text, attrs, computed style) |
 | `dom_eval(js)` | Run a small JS snippet in the current page context, return the JSON-serialisable result |
-| `dom_patch(selector, action, value)` | Apply a transient DOM change (`set_text`, `set_attr`, `add_class`, ...) so the agent can preview an effect before persisting it as an `edit_section` |
+| `dom_patch(selector, action, value)` | Apply a transient DOM change (`set_text`, `set_attr`, `add_class`, ...) as a preview before persisting via `edit_page` |
 | `get_client_logs(limit?, level?)` | Recent console messages, network failures, and runtime exceptions from the rendered page |
 | `reload_page()` | Force the client to re-render after an edit, so the agent can verify the result |
 
-**Why structural tools instead of "regenerate this page":**
-- Naive regeneration loses fidelity, formatting, and direct edits
-- Structural edits diff cleanly in git
-- The agent's failure modes become localised (a bad section, not a destroyed page)
+**Why one big `edit_page` instead of `edit_section` / `add_section` / `rename_section`:** with Claude Code as the editor, fine-grained structural tools become redundant. Claude Code *is* the structural editor — it reads the page, finds the right section, and makes the change. Giving the orchestrator a narrow structural API would force it to plan edits at a level of detail that Claude Code handles better on its own.
 
-**Anchors and conventions:**
-- Every `<section>` has a `data-section-id` (short hash, stable across edits)
-- Direct edits get `data-direct-edit="true"` so the agent treats them as immutable unless instructed
-- Generated/derived sections get `data-derived="true"` so they can be regenerated freely
+**Anchors and conventions (enforced by the parser, not Claude Code):**
+- Every `<section>` has a `data-section-id` (short deterministic hash from heading + position). If Claude Code adds a new section without an ID, the parser assigns one on the next read.
+- Direct edits get `data-direct-edit="true"` so Claude Code is told (via the edit prompt) to preserve them.
+- Derived sections get `data-derived="true"` so they can be regenerated freely.
 
 **Failure handling:**
-- All edits go through a validate step (HTML well-formed, section IDs exist, no orphan links)
-- Failed edits are rolled back before the response is shown to the user
-- The user sees the planned edit as a preview *before* commit, with confirm/cancel for non-trivial changes
+- After every `edit_page` the wrapper validates: HTML well-formed, `<title>` present, no broken `data-*` references to missing data files
+- If validation fails, the change is rolled back (git reset) and the error bubbles up to the orchestrator, which can re-prompt Claude Code or report the failure
+- For non-trivial edits (deletes, restructures, new pages) the frontend shows a preview before the final commit is exposed — though the git commit itself has already happened at that point, so "undo" is really `git revert`
 
 ### 4.3 Client-side capabilities (DOM access & logs)
 
@@ -244,15 +276,20 @@ The agent's `dom_*` and `get_client_logs` tools cross the network boundary: they
 
 ```
 pages/
-  index.html              # generated home page (recent + pinned)
+  index.html                    # generated home page (recent + pinned)
+  welcome.html                  # seeded on first run
   2026-04-10-standup.html
   auth-migration.html
-  postgres-notes.html
+  sales-review.html
+  sales-review.data/            # per-page data files (sibling dir)
+    q1.csv
+    q2.csv
+    targets.json
   ...
 data/
-  bm25_vocab.json         # BM25 IDF/vocab state, fit incrementally
-  sessions.json           # existing chat session store
-qdrant/                   # Qdrant storage volume (when running locally)
+  bm25_vocab.json               # BM25 IDF/vocab state, fit incrementally
+  sessions.json                 # existing chat session store
+qdrant/                         # Qdrant storage volume (when running locally)
   ...
 ```
 
@@ -310,48 +347,44 @@ Embeddings are not separately cached: Qdrant *is* the cache, and unchanged secti
 
 **Other databases (future):** if we add user accounts, billing, or audit logs for the hosted offering, those go in a separate relational store (Postgres). Qdrant stays focused on search.
 
-### 4.6 Frontend: SvelteKit
+### 4.6 Frontend
 
-**Why SvelteKit:**
-- Smallest-runtime mainstream framework → best fit for mobile-first PWA
-- File-based routing, SSR optional, easy to deploy as static + API
-- Stores model fits a chat-driven app well (single source of truth for messages, pages, edit queue)
-- The user is comfortable with it / wants it
+**Current implementation: vanilla ES modules, mobile-first.** The v1 ships as a framework-free SPA built with modern browser primitives — native ES modules, CSS custom properties, `fetch` + `ReadableStream` for SSE, Web Speech API for voice. No build step, no bundler, served directly by Quart from `src/static/notes/`.
+
+**Why vanilla over SvelteKit (revised from earlier draft):**
+- Zero build step means the Docker image, CI, and deploy scripts don't grow a node toolchain
+- The frontend is small enough (~700 lines JS + ~550 lines CSS) that a framework's abstractions aren't paying rent
+- Keeps iteration fast: edit file → reload browser
+- A framework migration can happen later without touching the backend — the API surface is the contract
 
 **Layout:**
 
 ```
-frontend/
-  src/
-    routes/
-      +layout.svelte         # app shell, bottom nav
-      +page.svelte           # chat (default surface)
-      pages/
-        +page.svelte         # page list
-        [id]/+page.svelte    # page view + inline edit
-      settings/+page.svelte
-    lib/
-      api.ts                 # fetch wrappers for /v1/*
-      sse.ts                 # SSE client for streaming chat
-      stores/
-        chat.ts
-        pages.ts
-        sync.ts              # offline edit queue
-      components/
-        ChatInput.svelte
-        ChatMessage.svelte
-        PageCard.svelte
-        EditPreview.svelte
-    service-worker.ts        # offline cache + queue
+src/
+  templates/
+    index.html               # SPA shell (Jinja, minimal — just injects config)
+    login.html               # password-auth login
   static/
-  svelte.config.js
-  vite.config.ts
+    notes/
+      app.js                 # entry point: state, UI wiring, chat streaming
+      api.js                 # fetch wrappers for /v1/* + SSE stream iterator
+      bridge.js              # client bridge WebSocket + console/log capture
+      app.css                # mobile-first styles, dark & light themes
 ```
 
-**Build & serve:**
-- Dev: SvelteKit dev server on `:5173`, proxies `/v1/*` to Quart on `$PORT`
-- Prod: `vite build` outputs static assets; Quart serves them from `frontend/build/` and the API from `/v1/*` on the same origin
-- The existing `Dockerfile` extends with a node build stage that produces the static bundle
+**UI surfaces:**
+- **Chat** — primary surface, bottom-anchored composer with voice button, bubble-based messages, markdown-rendered assistant replies with a streaming cursor.
+- **Pages drawer** — slide-in left drawer with searchable page list; opened from the hamburger icon.
+- **Page viewer sheet** — slide-up sheet showing the rendered HTML in a sandboxed iframe (`sandbox="allow-scripts allow-same-origin"`) so page scripts (charts, etc.) run in isolation without leaking access to the chat surface.
+
+**Mobile-first details:**
+- Safe-area insets honoured top and bottom
+- `100dvh` layout that survives the mobile browser chrome showing/hiding
+- `backdrop-filter` blurred topbar and composer
+- Touch-friendly tap targets (40px min)
+- Responsive max-width of 760px on desktop with bordered rails
+
+**Future work:** when offline/PWA features become a priority, the same HTML shell can be moved inside a SvelteKit build without changing the API surface. The original SvelteKit plan in earlier drafts of this spec is preserved in git history if we want to revisit it.
 
 ### 4.7 Backend modules
 
@@ -365,14 +398,17 @@ The maintainer-facing self-improvement agent in `src/agents/` is unrelated to th
 
 | Module | Purpose |
 |---|---|
-| `src/pages/store.py` | Page CRUD on disk + git commit on every write |
-| `src/pages/parser.py` | HTML → section tree, section ID assignment, validation |
+| `src/pages/store.py` | Page + data CRUD on disk, snapshot/restore, git commit per edit |
+| `src/pages/parser.py` | HTML → section tree, stable section ID assignment, validation |
+| `src/pages/data_store.py` | Per-page data dir (`<slug>.data/`): list/read/write/delete, size + type limits |
 | `src/pages/index.py` | Qdrant indexer: parse → diff → embed → upsert; watches `pages/` for external edits. Pattern lifted from `/Users/marko/dev_p/gmail/src/search/indexer.py`. |
 | `src/pages/search.py` | Hybrid query (sparse BM25 + dense Qwen3 + RRF), score thresholding, snippet generation. Pattern lifted from `/Users/marko/dev_p/gmail/src/search/search.py`. |
 | `src/pages/bm25.py` | Incremental BM25 vocabulary / IDF encoder. Copied from `/Users/marko/dev_p/gmail/src/search/bm25.py`. |
 | `src/pages/embeddings.py` | OpenAI-compatible `/embeddings` client targeting `LLM_BASE_URL` with the Qwen3-embedding-4b model. Copied from the gmail reference. |
-| `src/pages/tools.py` | Page tool implementations (`read_page`, `edit_section`, `search`, ...) |
-| `src/pages/routes.py` | `/v1/pages`, `/v1/search`, `/v1/sync` HTTP endpoints |
+| `src/pages/claude_editor.py` | Constrained Claude Code subprocess wrapper for HTML edits (§4.9) |
+| `src/pages/tools.py` | Orchestrator tool implementations (`read_page`, `edit_page`, `search`, `write_data`, ...) |
+| `src/pages/routes.py` | `/v1/pages`, `/v1/pages/<id>/data/<file>`, `/v1/search` HTTP endpoints |
+| `src/pages/seed.py` | First-run seed of `pages/` with welcome + example pages |
 | `src/client_bridge/channel.py` | WebSocket session registry: backend ↔ open browser tab, used by the DOM/log tools |
 | `src/client_bridge/tools.py` | DOM tools (`dom_query`, `dom_eval`, `dom_patch`, `reload_page`) and `get_client_logs`, all routed through the channel |
 | `src/agent_runtime/notes_agent.py` | The single product agent: registers page tools + client-bridge tools, owns the system prompt |
@@ -389,15 +425,59 @@ The maintainer-facing self-improvement agent in `src/agents/` is unrelated to th
 - Tool executor (`src/tool_executor.py`) — page tools and DOM tools register the same way
 - Session store, auth, request logging
 - Docker, CI/CD, deploy scripts (extended, not replaced)
+- `src/agents/claude_runner.py` — the existing Claude Code subprocess wrapper, reused by the page editor (§4.9)
 
 ### 4.8 LLM and embeddings
 
-**One provider, two endpoints, one base URL.** Both chat and embeddings hit the same OpenAI-compatible `LLM_BASE_URL` already configured for the agent. No second provider, no second API key.
+**One provider, two endpoints, one base URL.** Both the orchestrator LLM and embeddings hit the same OpenAI-compatible `LLM_BASE_URL` already configured for the agent. No second provider, no second API key.
 
-- **Agent runtime:** existing `LLM_BASE_URL` + `LLM_MODEL` (currently `gpt-oss-120b`, swappable). For the hosted offering, the default chat model is TBD — likely Claude Sonnet/Opus for tool-use reliability.
+- **Orchestrator agent:** existing `LLM_BASE_URL` + `LLM_MODEL` (currently `gpt-oss-120b`, swappable). Handles conversation, retrieval, tool calls, data management, and formulating edit instructions for Claude Code.
+- **HTML editor:** Claude Code, invoked as a subprocess — **not** routed through `LLM_BASE_URL`. See §4.9. Claude Code uses its own authentication (the host machine's `claude` CLI).
 - **Embeddings:** [`qwen3-embedding-4b`](https://docs.privatemode.ai/models/qwen3-embedding-4b/) via `POST {LLM_BASE_URL}/embeddings`, 1024 dimensions, cosine distance. PrivateMode is the reference provider; any OpenAI-compatible `/embeddings` endpoint works.
 - **Configuration:** `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` env vars (defaulting to `qwen3-embedding-4b` and `1024`), mirroring the gmail project.
-- **No model lock-in.** All chat and embedding calls go through one client interface; switching providers is one config change. The dimension is fixed per-collection, so switching embedding models requires a re-index — that's by design and acceptable.
+- **No model lock-in on the orchestrator or embeddings side.** All such calls go through one client interface. Claude Code is a deliberate second dependency because its edit quality is worth it.
+
+### 4.9 Claude Code as the HTML editor
+
+**All HTML edits go through Claude Code** (`claude` CLI, invoked as a subprocess). The orchestrator LLM never writes HTML into a tool call; it formulates a natural-language instruction and hands it to Claude Code, which actually modifies the file on disk.
+
+**Why Claude Code, not "just have the orchestrator LLM emit HTML":**
+- Claude Code is dramatically better at reading a file, finding the relevant spot, and making a minimal, style-consistent change than a general-purpose model doing it via tool calls
+- It can use its full editing toolbox (Read, Grep, Edit) against a single file without leaking scope to the rest of the repo, because we run it with a constrained `cwd` and prompt
+- The edit operation becomes a black box with a clean contract: "make this change to this file, I'll handle git and indexing" — the orchestrator doesn't need to reason about the HTML
+
+**Invocation model.** `src/pages/claude_editor.py` wraps the existing `src/agents/claude_runner.py` pattern (`subprocess.Popen`, stream-json output) with a narrower contract:
+
+```python
+edit_page(page_id: str, instruction: str, context: dict) -> EditResult
+```
+
+Where:
+- `cwd` is the `pages/` directory (Claude Code only sees page files, not `src/`)
+- The **prompt** is built from a template that includes:
+  - The target filename (`<slug>.html`) as the sole file to edit
+  - A list of data files available in `<slug>.data/` the page can reference
+  - The user's natural-language instruction
+  - The section-ID + direct-edit conventions Claude Code must preserve
+  - An instruction to **not touch any other file**
+- Claude Code runs with `--dangerously-skip-permissions` (necessary for non-interactive use) but the constrained `cwd` limits blast radius to `pages/`
+- Output is parsed for success/failure; stdout is captured and streamed back through the orchestrator's SSE so the user sees progress
+
+**Safety boundary.** Claude Code's `cwd` is `pages/`, not the repo root. It has filesystem access within that directory only (enforced by the wrapper checking for paths outside `cwd` in the captured tool events and refusing to commit if detected). Writes outside `pages/` are rejected at the commit step.
+
+**Per-edit workflow:**
+1. Orchestrator calls `edit_page(page_id, instruction)` as a tool
+2. Wrapper snapshots the git state (`git rev-parse HEAD` + check clean-ish)
+3. Wrapper builds the constrained prompt, runs Claude Code in `pages/`
+4. On exit: re-parse the target file, validate (well-formed HTML, title present, data refs resolve)
+5. If valid: `git add pages/<slug>.html pages/<slug>.data/` (as needed), `git commit` with the user instruction as subject
+6. Re-index changed sections into Qdrant
+7. If invalid or Claude Code failed: `git checkout -- pages/<slug>.html pages/<slug>.data/` and surface the error
+8. Return `EditResult` with summary + diff to the orchestrator
+
+**Tests.** The wrapper is mockable — `claude_runner.run_claude` is injected so tests swap in a fake that writes deterministic HTML to the target file. No real `claude` CLI required for CI.
+
+**Fallback when Claude Code is unavailable.** For environments without a `claude` CLI (CI, some self-hosters), `NOTES_EDITOR=mock` falls back to a simple Python editor that accepts raw HTML replacements via tool calls. This is inferior and documented as a degraded mode; the default is Claude Code.
 
 ---
 

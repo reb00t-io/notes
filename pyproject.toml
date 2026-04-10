@@ -17,6 +17,7 @@ dependencies = [
   "quart>=0.20",
   "uvicorn==0.40.0",
   "httpx>=0.28",
+  "qdrant-client>=1.12",
 ]
 
 [project.scripts]

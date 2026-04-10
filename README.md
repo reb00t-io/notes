@@ -21,12 +21,13 @@ Pages are plain HTML, persisted to disk and versioned with git. You don't write 
 
 ## Architecture (high level)
 
-- **Backend:** Quart (async Python) — LLM proxy, agent runtime, page CRUD, search index, auth.
-- **Frontend:** SvelteKit, mobile-first PWA. Chat is the primary surface; pages render alongside.
-- **Storage:** HTML files in a `pages/` directory under git as the source of truth. Qdrant as the search index — hybrid BM25 + dense vectors with RRF fusion in a single query. Embeddings via Qwen3-embedding-4b on the same OpenAI-compatible endpoint as the chat model.
-- **Agent:** A tool-using LLM with structural page-edit tools (`read_page`, `edit_section`, `create_page`, `search`, ...). Streaming responses; every edit is a git commit.
+- **Backend:** Quart (async Python) — streaming LLM proxy, agent runtime, page CRUD, Qdrant-backed hybrid search, auth, client-bridge WebSocket.
+- **Frontend:** framework-free vanilla ES modules, mobile-first. Chat is the primary surface; pages open in a sandboxed iframe sheet. No build step.
+- **Storage:** HTML files in a `pages/` directory under git as the source of truth. Data files live in sibling `pages/<slug>.data/` directories. Qdrant is the search index — hybrid BM25 + dense vectors with RRF fusion in a single query. Embeddings via Qwen3-embedding-4b on the same OpenAI-compatible endpoint as the chat model.
+- **Agent:** A single product agent. The orchestrator LLM handles conversation, retrieval, data management, and planning. All HTML edits are delegated to **Claude Code** (`claude` CLI subprocess), constrained to the target page file. Every edit is a git commit.
+- **Client bridge:** WebSocket from browser to backend so agent tools can inspect the rendered DOM and read console logs on the user's open page.
 
-The current repo already contains a working Quart streaming chat with tool execution; this is the foundation we extend. See [`docs/spec.md`](docs/spec.md) §5 for the integration plan.
+See [`docs/spec.md`](docs/spec.md) for the full specification.
 
 ## Open source & hosting
 
@@ -34,24 +35,39 @@ The current repo already contains a working Quart streaming chat with tool execu
 - **Managed hosting** is the commercial offering: hosted instance, sync, backups, mobile push, multi-device, no LLM key required.
 - The open-source build and the hosted build run the same code; hosting adds operational glue, not features.
 
-## Quick start (current scaffold)
+## Quick start
 
 ```bash
 direnv allow                    # creates venv, installs deps
+
+# Start Qdrant in the background (search index)
+docker run -d --name notes-qdrant -p 6333:6333 qdrant/qdrant
+
+# Environment: point at your OpenAI-compatible LLM endpoint
+export LLM_BASE_URL=https://your-llm/v1
+export LLM_API_KEY=sk-...
+
 python src/main.py              # → http://localhost:$PORT
 ```
 
-Or with Docker:
+On first run the app seeds three starter pages (`welcome`, `getting-started`, `chart-example`) so there's something to look at.
+
+Or with Docker (brings up Quart + Qdrant as a compose stack):
 
 ```bash
 ./scripts/build.sh
 docker compose up
 ```
 
-The current `/` route still shows the bootstrap chat panel. The notes UI replaces it — see the spec for the migration plan.
+## Testing
+
+```bash
+pytest
+```
+
+105 tests covering parser, page store, data store, BM25, hybrid search, Claude Code editor (mocked), page tools, routes, client bridge, and the main HTTP surface.
 
 ## Documentation
 
 - [`docs/spec.md`](docs/spec.md) — full product + technical specification
 - [`AGENTS.md`](AGENTS.md) — instructions for AI agents working in this repo
-- [`plan.md`](plan.md) — short-term improvement plan
