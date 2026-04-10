@@ -94,9 +94,29 @@ retry_cmd 3 2 ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p ~/${IMAGE_NAME}"
 retry_cmd 3 2 scp "${SCP_OPTS[@]}" docker-compose.yml "$REMOTE":~/"${IMAGE_NAME}"/docker-compose.yml
 echo "ok"
 
-# ---- ensure data dir on remote -------------------------------------------
-printf "==> ensuring remote data dir..."
-ssh "${SSH_OPTS[@]}" "$REMOTE" 'mkdir -p "$HOME/.bootstrap-template/data"' > /dev/null 2>&1
+# ---- ensure data dirs on remote ------------------------------------------
+# docker-compose.yml bind-mounts ~/.notes/data -> /data (pages, app state)
+# and ~/.notes/qdrant -> /qdrant/storage (vector index).
+#
+# Docker auto-creates bind-mount source dirs as root if they don't exist,
+# which then blocks subsequent non-root chmod/chown. We use sudo to force
+# the dirs to our user and grant broad write perms so the in-container
+# app user (and the qdrant container user) can both write.
+printf "==> ensuring remote data dirs..."
+ensure_dirs_log=$(mktemp)
+if ! ssh "${SSH_OPTS[@]}" "$REMOTE" '
+  set -e
+  sudo -n mkdir -p "$HOME/.notes/data" "$HOME/.notes/qdrant"
+  sudo -n chown -R "$USER:$USER" "$HOME/.notes"
+  chmod -R a+rwX "$HOME/.notes"
+' >"$ensure_dirs_log" 2>&1; then
+  echo "FAIL"
+  echo "    ensure-dirs output:"
+  sed 's/^/    /' "$ensure_dirs_log"
+  rm -f "$ensure_dirs_log"
+  exit 1
+fi
+rm -f "$ensure_dirs_log"
 echo "ok"
 
 # ---- write .env on remote ------------------------------------------------
@@ -132,17 +152,34 @@ EOF
 echo "ok"
 
 # ---- start services ------------------------------------------------------
-# Remove any stray container with the target name that isn't managed by the
-# current compose project (e.g. left over from an older `docker run`-based
-# deploy). docker compose up would otherwise fail with a name conflict.
-printf "==> removing stray container (if any)..."
+# Remove stray containers that would block `docker compose up`:
+#   1. Any container literally named `${IMAGE_NAME}` that isn't part of
+#      the current compose project.
+#   2. Legacy containers from earlier deploys with different names
+#      (e.g. `bootstrap-template`).
+#   3. Anything (not in our compose project) still binding the target PORT.
+# The last one is the robust fallback — it catches cases where the legacy
+# container was renamed or we don't know its old name.
+printf "==> removing stray containers (if any)..."
 ssh "${SSH_OPTS[@]}" "$REMOTE" "
-  if docker inspect ${IMAGE_NAME} >/dev/null 2>&1; then
-    project_label=\$(docker inspect ${IMAGE_NAME} --format '{{ index .Config.Labels \"com.docker.compose.project\" }}')
-    if [ -z \"\$project_label\" ] || [ \"\$project_label\" != \"${IMAGE_NAME}\" ]; then
-      docker rm -f ${IMAGE_NAME} >/dev/null
+  set +e
+  # (1) + (2): well-known legacy names
+  for name in ${IMAGE_NAME} bootstrap-template; do
+    if docker inspect \"\$name\" >/dev/null 2>&1; then
+      project_label=\$(docker inspect \"\$name\" --format '{{ index .Config.Labels \"com.docker.compose.project\" }}')
+      if [ -z \"\$project_label\" ] || [ \"\$project_label\" != \"${IMAGE_NAME}\" ]; then
+        docker rm -f \"\$name\" >/dev/null
+      fi
     fi
-  fi
+  done
+  # (3): anything binding PORT that isn't ours
+  for cid in \$(docker ps -a --filter publish=${PORT} --format '{{.ID}}'); do
+    project_label=\$(docker inspect \"\$cid\" --format '{{ index .Config.Labels \"com.docker.compose.project\" }}' 2>/dev/null)
+    if [ -z \"\$project_label\" ] || [ \"\$project_label\" != \"${IMAGE_NAME}\" ]; then
+      docker rm -f \"\$cid\" >/dev/null
+    fi
+  done
+  exit 0
 " 2>/dev/null || true
 echo "ok"
 
@@ -170,6 +207,8 @@ WAIT_DEADLINE=$(( $(date +%s) + WAIT_TIMEOUT_SECONDS ))
 server_ready=false
 
 while (( $(date +%s) < WAIT_DEADLINE )); do
+  # /login returns 200 in both auth modes (password page or redirect) and
+  # is not gated by API_KEY, so it's a safe liveness probe.
   if ssh "${SSH_OPTS[@]}" "$REMOTE" "curl -sf --max-time 3 http://localhost:${PORT}/login > /dev/null" 2>/dev/null; then
     server_ready=true
     break
@@ -193,7 +232,7 @@ if ! body=$(curl -sfL --max-time 10 "$PUBLIC_URL"); then
   exit 1
 fi
 
-if ! echo "$body" | grep -qE "hello|Sign in"; then
+if ! echo "$body" | grep -qE "<title>Notes</title>|Sign in"; then
   echo "FAIL"
   echo "    $PUBLIC_URL response did not look right"
   echo "    $body"

@@ -8,7 +8,7 @@ import resource
 import signal
 import sys
 import tempfile
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import aiohttp
 
@@ -24,6 +24,33 @@ MAX_OUTPUT_CHARS = 12000
 KILL_GRACE_SECONDS = 15
 
 logger = logging.getLogger(__name__)
+
+
+# ── Registry for pluggable tool handlers ─────────────────────────────
+# The notes agent registers its handler here at startup. A registry entry
+# takes precedence over the built-in dispatch below; this lets us replace
+# the bash/python/web tools entirely without touching existing tests.
+
+RegistryHandler = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+_tool_registry: list[RegistryHandler] = []
+
+
+def register_tool_handler(handler: RegistryHandler) -> None:
+    _tool_registry.append(handler)
+
+
+def clear_tool_handlers() -> None:
+    _tool_registry.clear()
+
+
+async def _try_registry(fn_name: str, fn_args: dict[str, Any]) -> dict[str, Any] | None:
+    for handler in _tool_registry:
+        result = await handler(fn_name, fn_args)
+        if isinstance(result, dict) and "error" in result and result["error"] == f"unknown notes tool: {fn_name}":
+            # Registry returned "unknown"; keep searching other handlers
+            continue
+        return result
+    return None
 
 
 def normalize_timeout_seconds(value: Any) -> int:
@@ -167,6 +194,11 @@ async def execute_tool_call(session: aiohttp.ClientSession, tool_call: dict[str,
         return {"error": f"Invalid tool arguments for {fn_name}: {exc}"}
 
     fn_args.pop("user_message", None)
+
+    # Registry handlers take precedence
+    registered = await _try_registry(fn_name or "", fn_args)
+    if registered is not None:
+        return registered
 
     if fn_name == "web_search":
         query = str(fn_args.get("query") or "").strip()

@@ -176,3 +176,9 @@ cython_debug/
 
 # Runtime data
 data/
+# User notebook content (per-install, seeded on first run)
+# Top-level only — src/pages/ is the Python package for page storage.
+/pages/
+# Qdrant local storage
+/qdrant/
+.notes/

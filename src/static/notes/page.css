@@ -1,0 +1,250 @@
+/* ════════════════════════════════════════════════════════════════════════
+   page.css — baseline styling for rendered note pages.
+   Injected into every page served via /v1/pages/<id>/raw.
+   Matches the app theme in app.css so pages feel like part of the shell.
+   Dark-first with prefers-color-scheme light override.
+   ════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --pg-bg:        #0f0f1f;
+  --pg-surface:   rgba(255,255,255,0.04);
+  --pg-surface-2: rgba(255,255,255,0.08);
+  --pg-border:    rgba(255,255,255,0.10);
+  --pg-text:      #eaeaf2;
+  --pg-text-mut:  #9a9ab5;
+  --pg-text-dim:  #6b6b86;
+  --pg-accent:    #7c74ff;
+  --pg-accent-2:  #b388ff;
+  color-scheme: dark light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --pg-bg:        #ffffff;
+    --pg-surface:   rgba(15,15,35,0.04);
+    --pg-surface-2: rgba(15,15,35,0.07);
+    --pg-border:    rgba(15,15,35,0.10);
+    --pg-text:      #0f0f23;
+    --pg-text-mut:  #576075;
+    --pg-text-dim:  #8690a8;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--pg-bg);
+  color: var(--pg-text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 22px 80px;
+}
+
+/* ─── Sections ────────────────────────────────────────────── */
+
+section {
+  margin-bottom: 28px;
+}
+
+section + section {
+  padding-top: 8px;
+}
+
+/* ─── Headings ────────────────────────────────────────────── */
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--pg-text);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  margin: 0 0 10px;
+}
+
+h1 {
+  font-size: 30px;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--pg-text), var(--pg-accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 14px;
+}
+
+h2 { font-size: 22px; margin-top: 24px; }
+h3 { font-size: 18px; margin-top: 18px; }
+h4 { font-size: 16px; margin-top: 14px; color: var(--pg-text-mut); text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* ─── Text ───────────────────────────────────────────────── */
+
+p {
+  margin: 0 0 12px;
+  color: var(--pg-text);
+}
+
+p + p { margin-top: 4px; }
+
+em, i { color: var(--pg-text-mut); font-style: italic; }
+strong, b { color: var(--pg-text); font-weight: 700; }
+small { color: var(--pg-text-dim); font-size: 0.875em; }
+
+a {
+  color: var(--pg-accent);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(124,116,255,0.35);
+  transition: border-color 0.15s, color 0.15s;
+}
+a:hover {
+  color: var(--pg-accent-2);
+  border-color: var(--pg-accent-2);
+}
+
+/* ─── Lists ──────────────────────────────────────────────── */
+
+ul, ol {
+  padding-left: 22px;
+  margin: 0 0 14px;
+}
+
+li {
+  margin: 4px 0;
+}
+
+ul ul, ol ol, ul ol, ol ul {
+  margin: 4px 0 4px;
+}
+
+/* ─── Code ───────────────────────────────────────────────── */
+
+code {
+  font-family: "SF Mono", ui-monospace, Consolas, "Liberation Mono", monospace;
+  font-size: 0.88em;
+  background: var(--pg-surface-2);
+  color: var(--pg-text);
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--pg-border);
+}
+
+pre {
+  background: rgba(0,0,0,0.4);
+  color: #eaeaf2;
+  border: 1px solid var(--pg-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+@media (prefers-color-scheme: light) {
+  pre { background: #0f0f23; color: #eaeaf2; }
+}
+
+/* ─── Blockquote ─────────────────────────────────────────── */
+
+blockquote {
+  margin: 12px 0;
+  padding: 4px 16px;
+  border-left: 3px solid var(--pg-accent);
+  color: var(--pg-text-mut);
+  font-style: italic;
+}
+
+blockquote p { color: inherit; }
+
+/* ─── Tables ─────────────────────────────────────────────── */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0;
+  font-size: 14px;
+  background: var(--pg-surface);
+  border: 1px solid var(--pg-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+th, td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--pg-border);
+}
+
+th {
+  background: var(--pg-surface-2);
+  font-weight: 600;
+  color: var(--pg-text);
+}
+
+tr:last-child td { border-bottom: none; }
+
+tr:hover td { background: var(--pg-surface); }
+
+/* ─── Media ──────────────────────────────────────────────── */
+
+img, svg, video {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+}
+
+figure {
+  margin: 16px 0;
+  text-align: center;
+}
+
+figcaption {
+  font-size: 13px;
+  color: var(--pg-text-dim);
+  margin-top: 6px;
+}
+
+canvas {
+  max-width: 100%;
+  border-radius: 12px;
+}
+
+/* ─── Horizontal rule ────────────────────────────────────── */
+
+hr {
+  border: none;
+  border-top: 1px solid var(--pg-border);
+  margin: 24px 0;
+}
+
+/* ─── Direct-edit affordance ─────────────────────────────── */
+
+[data-direct-edit="true"]:focus {
+  outline: 2px solid var(--pg-accent);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+/* ─── Responsive tweaks ──────────────────────────────────── */
+
+@media (max-width: 520px) {
+  body { padding: 20px 16px 60px; }
+  h1 { font-size: 26px; }
+  h2 { font-size: 20px; }
+  h3 { font-size: 17px; }
+}
