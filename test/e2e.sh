@@ -12,7 +12,9 @@ set -euo pipefail
 # fine without a working LLM endpoint because agent calls are lazy.
 export LLM_BASE_URL="${LLM_BASE_URL:-http://fake-llm-for-e2e.invalid}"
 export LLM_API_KEY="${LLM_API_KEY:-e2e}"
-export API_KEY="${API_KEY:-}"
+# Non-empty default so the e2e exercises the auth-gated path of the
+# /v1/* routes and CI does not need any real secrets configured.
+export API_KEY="${API_KEY:-e2e-test-key}"
 export AUTH_MODE="${AUTH_MODE:-none}"
 export AUTH_PASSWORD="${AUTH_PASSWORD:-}"
 export NOTES_EDITOR="${NOTES_EDITOR:-mock}"
@@ -107,8 +109,15 @@ fi
 
 echo "deploy date is ${age}s old, ok"
 
-echo "checking API: /v1/pages..."
-pages_json=$(curl -sf "http://localhost:${PORT}/v1/pages")
+echo "checking API: /v1/pages (auth required)..."
+# First, confirm the route is actually gated when no bearer is sent.
+unauth_status=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:${PORT}/v1/pages" || true)
+if [ "$unauth_status" != "401" ]; then
+  echo "FAIL: /v1/pages without Authorization should be 401, got ${unauth_status}"
+  exit 1
+fi
+# Then exercise the authenticated path with the bearer.
+pages_json=$(curl -sf -H "Authorization: Bearer ${API_KEY}" "http://localhost:${PORT}/v1/pages")
 if ! echo "$pages_json" | grep -q '"welcome"'; then
   echo "FAIL: /v1/pages did not include the seeded welcome page"
   echo "$pages_json"
