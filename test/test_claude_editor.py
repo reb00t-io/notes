@@ -1,9 +1,12 @@
 """Tests for src/pages/claude_editor.py (via injection, no real claude CLI)."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from unittest.mock import MagicMock
+
 import pytest
 
-from src.pages.claude_editor import ClaudeEditor, set_editor_fn
+from src.pages.claude_editor import ClaudeEditor, _strip_code_fence, set_editor_fn
 from src.pages.data_store import DataStore
 from src.pages.store import PageStore
 
@@ -73,6 +76,94 @@ async def test_mock_editor_mode_produces_valid_page(tmp_pages):
     rec = store.read("m")
     # mock editor appends a <section data-derived>
     assert any(s.derived for s in rec.parsed.sections)
+
+
+def test_strip_code_fence_removes_markdown_wrapping():
+    assert _strip_code_fence("<!doctype html><html></html>") == "<!doctype html><html></html>"
+    fenced = "```html\n<!doctype html>\n<html></html>\n```"
+    assert _strip_code_fence(fenced) == "<!doctype html>\n<html></html>"
+    fenced_no_lang = "```\n<html></html>\n```"
+    assert _strip_code_fence(fenced_no_lang) == "<html></html>"
+
+
+def _fake_llm_client(response_content: str):
+    """Build an httpx-shaped fake AsyncClient that returns response_content."""
+
+    @asynccontextmanager
+    async def factory(*args, **kwargs):
+        client = MagicMock()
+        async def post(*a, **kw):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json = MagicMock(return_value={
+                "choices": [{"message": {"content": response_content}}],
+            })
+            return resp
+        client.post = post
+        yield client
+
+    return factory
+
+
+async def test_llm_editor_writes_returned_html(tmp_pages, monkeypatch):
+    monkeypatch.setenv("LLM_BASE_URL", "http://fake-llm")
+    store = PageStore(pages_dir=tmp_pages)
+    data_store = DataStore(store)
+    rec = store.create(title="Diary", body_html="<h1>Day 1</h1><p>old</p>")
+
+    new_html = (
+        "<!doctype html><html><head><title>Diary</title></head>"
+        "<body><section><h1>Day 1</h1><p>fresh entry</p></section></body></html>"
+    )
+    fake = _fake_llm_client(new_html)
+
+    # Patch httpx.AsyncClient inside the module's import scope
+    import src.pages.claude_editor as ed_mod
+    monkeypatch.setattr(ed_mod, "_run_claude_subprocess", lambda *a, **k: (1, "", "should not be called"))
+
+    # Drive _llm_edit directly with a stub client factory
+    from src.pages.claude_editor import _llm_edit
+    await _llm_edit(rec.path, "rewrite the entry", {"data_files": [], "page_index": []}, client_factory=fake)
+    written = rec.path.read_text()
+    assert "fresh entry" in written
+
+
+async def test_llm_editor_strips_code_fences(tmp_pages, monkeypatch):
+    monkeypatch.setenv("LLM_BASE_URL", "http://fake-llm")
+    store = PageStore(pages_dir=tmp_pages)
+    rec = store.create(title="X", body_html="<p>x</p>")
+    fenced = (
+        "```html\n"
+        "<!doctype html><html><head><title>X</title></head>"
+        "<body><p>fenced</p></body></html>\n"
+        "```"
+    )
+    fake = _fake_llm_client(fenced)
+    from src.pages.claude_editor import _llm_edit
+    await _llm_edit(rec.path, "set body", {"data_files": [], "page_index": []}, client_factory=fake)
+    written = rec.path.read_text()
+    assert "fenced" in written
+    assert "```" not in written
+
+
+async def test_llm_editor_rejects_non_html_response(tmp_pages, monkeypatch):
+    monkeypatch.setenv("LLM_BASE_URL", "http://fake-llm")
+    store = PageStore(pages_dir=tmp_pages)
+    rec = store.create(title="X", body_html="<p>x</p>")
+    fake = _fake_llm_client("Sure, I'll do that for you!")
+    from src.pages.claude_editor import _llm_edit
+    with pytest.raises(RuntimeError, match="not return a full HTML document"):
+        await _llm_edit(rec.path, "edit", {"data_files": [], "page_index": []}, client_factory=fake)
+
+
+async def test_llm_editor_rejects_empty_response(tmp_pages, monkeypatch):
+    monkeypatch.setenv("LLM_BASE_URL", "http://fake-llm")
+    store = PageStore(pages_dir=tmp_pages)
+    rec = store.create(title="X", body_html="<p>x</p>")
+    fake = _fake_llm_client("")
+    from src.pages.claude_editor import _llm_edit
+    with pytest.raises(RuntimeError, match="empty"):
+        await _llm_edit(rec.path, "edit", {"data_files": [], "page_index": []}, client_factory=fake)
 
 
 async def test_create_page_uses_editor(editor):

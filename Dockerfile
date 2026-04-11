@@ -15,7 +15,10 @@ ARG DEPLOY_DATE=unknown
 ENV DEPLOY_DATE=$DEPLOY_DATE
 ARG PORT
 ENV PORT=$PORT
-ENV NOTES_EDITOR=mock
+# Production editor: route HTML edits through LLM_BASE_URL/chat/completions.
+# Override to `claude` if you install the claude CLI in the image, or to
+# `mock` for tests/CI environments without an LLM endpoint.
+ENV NOTES_EDITOR=llm
 
 RUN useradd --create-home appuser \
     && git config --system user.email "notes@container" \

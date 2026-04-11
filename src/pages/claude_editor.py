@@ -153,10 +153,12 @@ def _run_claude_subprocess(prompt: str, cwd: Path, stdout_tail_lines: int = 20) 
 
 
 def _mock_edit(page_path: Path, instruction: str, context: dict) -> None:
-    """Fallback editor: appends a small section recording the instruction.
+    """Test stub: appends a section recording the instruction.
 
-    Deliberately boring. This exists so CI environments without a `claude`
-    CLI can still exercise the edit pipeline.
+    Deliberately boring. Only intended for tests — never set
+    NOTES_EDITOR=mock in production; the agent's edits will look like
+    "the instruction was pasted onto the page" because that's literally
+    what this function does.
     """
     html = page_path.read_text(encoding="utf-8")
     note = f'<section data-derived="true"><h3>Note</h3><p>{instruction}</p></section>'
@@ -165,6 +167,131 @@ def _mock_edit(page_path: Path, instruction: str, context: dict) -> None:
     else:
         html = html + note
     page_path.write_text(html, encoding="utf-8")
+
+
+LLM_EDIT_SYSTEM_PROMPT = """\
+You are an HTML page editor. You receive the current HTML of a single \
+page and an instruction describing what to change. You output the \
+COMPLETE new HTML for the page after applying the change.
+
+Hard rules:
+- Output ONLY the raw HTML. No commentary, no explanation, no markdown
+  fences. Start with <!doctype html> or <html>. End with </html>.
+- Preserve the existing <title> unless the instruction explicitly asks
+  to change it.
+- Preserve every `data-section-id` attribute on existing <section>
+  elements. New sections you add can omit this attribute — the system
+  will assign one.
+- Never remove or alter elements with `data-direct-edit="true"` unless
+  the instruction explicitly targets them.
+- Elements with `data-derived="true"` are safe to regenerate or replace.
+- Make the smallest, most surgical change that satisfies the
+  instruction. Do not reformat or rewrite untouched sections.
+- Keep the document well-formed HTML5: <html>, <head> with <title>,
+  and <body>.
+- Reference data files by relative URLs like
+  `/v1/pages/<page_id>/data/<filename>` — they are already attached.
+"""
+
+
+def _strip_code_fence(text: str) -> str:
+    """Some LLMs wrap output in ```html ... ``` even when told not to."""
+    text = text.strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    # Drop opening fence (possibly with language tag)
+    lines = lines[1:]
+    # Drop trailing fence if present
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+async def _llm_edit(
+    page_path: Path,
+    instruction: str,
+    context: dict,
+    *,
+    client_factory=None,
+) -> None:
+    """Edit a page by asking the orchestrator LLM to rewrite its HTML.
+
+    Sends a single non-streaming chat completion to LLM_BASE_URL with the
+    current HTML + the instruction, and writes the response back to disk.
+    Used in production where Claude Code is not installed.
+    """
+    import httpx
+
+    base = os.environ.get("LLM_BASE_URL", "")
+    key = os.environ.get("LLM_API_KEY", "")
+    model = os.environ.get("LLM_EDIT_MODEL") or os.environ.get("LLM_MODEL") or "gpt-oss-120b"
+    if not base:
+        raise RuntimeError("LLM_BASE_URL not set")
+
+    current_html = page_path.read_text(encoding="utf-8")
+
+    data_files = context.get("data_files") or []
+    if data_files:
+        df_lines = "\n".join(
+            f"- {d['name']} ({d.get('size', '?')} bytes)" for d in data_files
+        )
+    else:
+        df_lines = "(none)"
+
+    section_summary = "(no sections yet)"
+    sections = context.get("page_index") or []
+    if sections:
+        section_summary = "\n".join(
+            f"- {s['id']}: {s['heading']!r}" for s in sections
+        )
+
+    user_msg = (
+        f"INSTRUCTION:\n{instruction.strip()}\n\n"
+        f"DATA FILES ATTACHED TO THIS PAGE:\n{df_lines}\n\n"
+        f"CURRENT SECTIONS:\n{section_summary}\n\n"
+        f"CURRENT HTML:\n{current_html}\n\n"
+        "Output the new complete HTML now, and nothing else."
+    )
+
+    factory = client_factory or httpx.AsyncClient
+    timeout = float(os.environ.get("LLM_EDIT_TIMEOUT", "180"))
+    async with factory(timeout=timeout) as client:
+        resp = await client.post(
+            f"{base.rstrip('/')}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "stream": False,
+                "messages": [
+                    {"role": "system", "content": LLM_EDIT_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    try:
+        content = data["choices"][0]["message"]["content"] or ""
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"unexpected LLM response shape: {exc}") from exc
+
+    new_html = _strip_code_fence(content)
+    if not new_html.strip():
+        raise RuntimeError("LLM returned empty content")
+
+    # Sanity guard: never write something that obviously isn't HTML.
+    lower = new_html.lower().lstrip()
+    if not (lower.startswith("<!doctype") or lower.startswith("<html")):
+        raise RuntimeError(
+            f"LLM did not return a full HTML document (got: {new_html[:80]!r})"
+        )
+
+    page_path.write_text(new_html, encoding="utf-8")
 
 
 class ClaudeEditor:
@@ -217,6 +344,8 @@ class ClaudeEditor:
                 _injected_editor_fn(page_path, instruction, ctx)
             elif self.mode == "mock":
                 _mock_edit(page_path, instruction, ctx)
+            elif self.mode == "llm":
+                await _llm_edit(page_path, instruction, ctx)
             else:
                 rc, tail, stderr = _run_claude_subprocess(prompt, self.store.pages_dir)
                 stdout_tail = tail
@@ -228,7 +357,7 @@ class ClaudeEditor:
                         error=f"claude exited {rc}: {stderr.strip()[:500]}",
                         stdout_tail=tail,
                     )
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:
             logger.exception("editor raised")
             self.store.restore(snapshot)
             return EditResult(ok=False, page_id=page_id, error=f"editor error: {exc}")

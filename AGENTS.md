@@ -62,7 +62,7 @@ Execute in order, do not skip steps:
 
 1. **Develop** — implement the change, adding tests alongside it
 2. **Test** — run `pytest` (all 109+ tests must pass)
-3. **End-to-end** — run `PORT=31000 ./test/e2e.sh` (builds the image, starts
+3. **End-to-end** — run `PORT=31010 ./test/e2e.sh` (builds the image, starts
    the compose stack, verifies the server comes up with a fresh deploy date
    meta tag and the seeded pages are reachable, then tears down)
 4. **Deploy** — run `./scripts/deploy.sh` (requires `PORT`, `PUBLIC_URL`,
@@ -85,14 +85,16 @@ tests. Do not push without a successful deploy.
 - [ ] No edits to `pages/` content as a side effect of the code change
 
 ### Common e2e / deploy gotchas
-- A stale `python src/main.py` process holding `localhost:31000` will make
+- A stale `python src/main.py` process holding `localhost:31010` will make
   e2e.sh appear to pass while actually hitting the old process. Check with
-  `lsof -iTCP:31000` before running e2e if you see stale template output.
+  `lsof -iTCP:31010` before running e2e if you see stale template output.
 - Docker bind-mount source dirs are auto-created by docker as root if
   absent. `deploy.sh` handles this via `sudo chown`/`chmod` on the remote;
   passwordless `sudo` is required on the deploy host.
-- The Docker image runs with `NOTES_EDITOR=mock` (no `claude` CLI in the
-  container). Real Claude Code edits only work in local dev.
+- The Docker image runs with `NOTES_EDITOR=llm` (no `claude` CLI in the
+  container). Edits go through `LLM_BASE_URL/chat/completions` instead.
+  Set `NOTES_EDITOR=claude` locally to use a real `claude` CLI; set
+  `NOTES_EDITOR=mock` only for tests / CI.
 - **Never pass `SKIP_DOCKER_BUILD=1` to `deploy.sh`.** `e2e.sh` builds a
   native-arch image (arm64 on Apple Silicon) for speed, but the remote
   host is linux/amd64. `deploy.sh` *must* rebuild with `--platform
