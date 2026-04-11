@@ -13,6 +13,11 @@ services:
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embedding-4b}
       - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
       - API_KEY=${API_KEY}
+      # Required by Claude Code (the editor) at runtime. Without it,
+      # `claude -p ...` exits with an auth error and edit_page fails
+      # while the rest of the app keeps working.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - NOTES_EDITOR=${NOTES_EDITOR:-claude}
       - AUTH_MODE=${AUTH_MODE:-none}
       - AUTH_PASSWORD=${AUTH_PASSWORD:-}
       - QDRANT_URL=http://qdrant:6333
@@ -24,6 +29,12 @@ services:
       - "${PORT}:${PORT}"
     volumes:
       - ${HOME}/.notes/data:/data
+      # Claude Code subscription credentials (OAuth tokens from
+      # `claude /login`). The container's appuser is uid 1000 so this
+      # bind mount works as long as the host dir is owned by uid 1000
+      # (true for the deploy host's `marko` user). When ANTHROPIC_API_KEY
+      # is set, claude code uses that instead and this dir can be empty.
+      - ${HOME}/.notes/claude-config:/home/appuser/.claude
 
   qdrant:
     image: qdrant/qdrant:latest

@@ -19,9 +19,13 @@ export AUTH_MODE="${AUTH_MODE:-none}"
 export AUTH_PASSWORD="${AUTH_PASSWORD:-}"
 export NOTES_EDITOR="${NOTES_EDITOR:-mock}"
 export NOTES_DISABLE_QDRANT="${NOTES_DISABLE_QDRANT:-1}"
+# Dummy default so docker-compose doesn't complain about an unbound
+# var. The e2e runs with NOTES_EDITOR=mock, so claude is never actually
+# invoked and the key value doesn't matter.
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-e2e-dummy}"
 
-mkdir -p "${HOME}/.notes/data" "${HOME}/.notes/qdrant"
-chmod 777 "${HOME}/.notes/data" "${HOME}/.notes/qdrant"
+mkdir -p "${HOME}/.notes/data" "${HOME}/.notes/qdrant" "${HOME}/.notes/claude-config"
+chmod 777 "${HOME}/.notes/data" "${HOME}/.notes/qdrant" "${HOME}/.notes/claude-config"
 
 if [ "${SKIP_DOCKER_BUILD:-0}" != "1" ]; then
   ./scripts/build.sh

@@ -93,6 +93,17 @@ retry_cmd() {
 : "${API_KEY:?API_KEY must be set}"
 : "${AUTH_PASSWORD:?AUTH_PASSWORD must be set}"
 
+# Claude Code auth in production:
+#   1. ANTHROPIC_API_KEY env var (optional override) → API-key billing
+#   2. Otherwise: subscription credentials from the deploy host's
+#      ~/.claude/ are seeded once into ~/.notes/claude-config/ on the
+#      first deploy and the long-running container reads them via the
+#      bind mount. The remote host MUST have Claude Code installed and
+#      logged in (`npm install -g @anthropic-ai/claude-code` then
+#      `claude /login` on the remote) before the first deploy will
+#      succeed.
+ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
+
 print_remote_diagnostics() {
   echo "    remote diagnostics:"
   ssh "${SSH_OPTS[@]}" "$REMOTE" "
@@ -157,7 +168,7 @@ printf "==> ensuring remote data dirs..."
 ensure_dirs_log=$(mktemp)
 if ! ssh "${SSH_OPTS[@]}" "$REMOTE" '
   set -e
-  sudo -n mkdir -p "$HOME/.notes/data" "$HOME/.notes/qdrant"
+  sudo -n mkdir -p "$HOME/.notes/data" "$HOME/.notes/qdrant" "$HOME/.notes/claude-config"
   sudo -n chown -R "$USER:$USER" "$HOME/.notes"
   chmod -R a+rwX "$HOME/.notes"
 ' >"$ensure_dirs_log" 2>&1; then
@@ -170,21 +181,79 @@ fi
 rm -f "$ensure_dirs_log"
 echo "ok"
 
+# ---- seed claude credentials --------------------------------------------
+# On first deploy, copy the remote host's ~/.claude/ (where the operator
+# has run `claude /login`) into ~/.notes/claude-config/, the dir that's
+# bind-mounted into the container at /home/appuser/.claude. After the
+# first seed the container manages its own credentials and refreshes
+# tokens independently of the host's ~/.claude/.
+#
+# Skipped entirely if ANTHROPIC_API_KEY is set (the container uses
+# the API key instead).
+#
+# Exit codes from the remote script:
+#   0  already seeded OR just seeded successfully
+#   2  no credentials in target AND no credentials on host
+deploy_step="seed claude credentials"
+if [ -z "$ANTHROPIC_API_KEY" ]; then
+  printf "==> seeding claude credentials (first deploy only)..."
+  set +e
+  ssh "${SSH_OPTS[@]}" "$REMOTE" '
+    set -e
+    TARGET="$HOME/.notes/claude-config"
+    SOURCE="$HOME/.claude"
+    mkdir -p "$TARGET"
+    if [ -f "$TARGET/.credentials.json" ]; then
+      echo "  already seeded"
+      exit 0
+    fi
+    if [ ! -f "$SOURCE/.credentials.json" ]; then
+      exit 2
+    fi
+    # First-time copy: bring in credentials + minimal settings, owned
+    # by the deploy user (uid 1000) so the container appuser can read
+    # and write them. Exclude per-project history and caches.
+    cp "$SOURCE/.credentials.json" "$TARGET/.credentials.json"
+    [ -f "$SOURCE/settings.json" ] && cp "$SOURCE/settings.json" "$TARGET/settings.json"
+    chmod 600 "$TARGET/.credentials.json"
+    echo "  seeded from ~/.claude/"
+  '
+  rc=$?
+  set -e
+  if [ "$rc" -eq 2 ]; then
+    echo "FAIL"
+    echo "    Claude Code is not authenticated on $REMOTE_HOST." >&2
+    echo "    SSH in once and run:" >&2
+    echo "      npm install -g @anthropic-ai/claude-code" >&2
+    echo "      claude /login" >&2
+    echo "    then re-run ./scripts/deploy.sh" >&2
+    exit 1
+  elif [ "$rc" -ne 0 ]; then
+    echo "FAIL (ssh exit $rc)"
+    exit 1
+  fi
+  echo " ok"
+fi
+
 # ---- write .env on remote ------------------------------------------------
 # All values are written through `printf %q` so secrets with quotes / spaces /
 # special characters survive the heredoc. The .env file format docker-compose
 # reads is documented here: https://docs.docker.com/compose/environment-variables/env-file/
 deploy_step="write remote .env"
 printf "==> writing remote .env..."
-printf -v port_q '%q'           "$PORT"
-printf -v llm_base_url_q '%q'   "$LLM_BASE_URL"
-printf -v llm_api_key_q '%q'    "$LLM_API_KEY"
-printf -v api_key_q '%q'        "$API_KEY"
-printf -v auth_password_q '%q'  "$AUTH_PASSWORD"
+printf -v port_q '%q'             "$PORT"
+printf -v llm_base_url_q '%q'     "$LLM_BASE_URL"
+printf -v llm_api_key_q '%q'      "$LLM_API_KEY"
+printf -v api_key_q '%q'          "$API_KEY"
+printf -v auth_password_q '%q'    "$AUTH_PASSWORD"
 
 # Optional values — only written if they're non-empty in the local shell.
+# ANTHROPIC_API_KEY is optional: when unset, claude code in the container
+# falls back to the OAuth credentials in the bind-mounted ~/.claude/.
+# Writing an empty value would override the file-based auth, so we
+# really do skip the line entirely instead of writing ANTHROPIC_API_KEY=.
 extra_env=""
-for var in LLM_MODEL STREAM_PACE_SECONDS; do
+for var in LLM_MODEL STREAM_PACE_SECONDS ANTHROPIC_API_KEY; do
   if [[ -n "${!var:-}" ]]; then
     printf -v val_q '%q' "${!var}"
     extra_env+="${var}=${val_q}"$'\n'
@@ -199,6 +268,7 @@ LLM_API_KEY=$llm_api_key_q
 API_KEY=$api_key_q
 AUTH_MODE=password
 AUTH_PASSWORD=$auth_password_q
+NOTES_EDITOR=claude
 ${extra_env}ENVEOF
 EOF
 echo "ok"

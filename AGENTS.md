@@ -100,10 +100,44 @@ for what `main` represents.
 - Docker bind-mount source dirs are auto-created by docker as root if
   absent. `deploy.sh` handles this via `sudo chown`/`chmod` on the remote;
   passwordless `sudo` is required on the deploy host.
-- The Docker image runs with `NOTES_EDITOR=llm` (no `claude` CLI in the
-  container). Edits go through `LLM_BASE_URL/chat/completions` instead.
-  Set `NOTES_EDITOR=claude` locally to use a real `claude` CLI; set
-  `NOTES_EDITOR=mock` only for tests / CI.
+- The Docker image ships with Node.js + `@anthropic-ai/claude-code`
+  installed and runs with `NOTES_EDITOR=claude`. The orchestrator LLM
+  never writes HTML; every edit shells out to `claude -p ... --allowedTools
+  Read,Edit,Write` via the `ClaudeAgent` wrapper from `agent_scripts/agent.py`,
+  with `cwd=pages/`.
+- Claude Code auth supports two modes:
+    1. **Subscription (Pro/Max), preferred** — Claude Code must be
+       installed and logged in *on the deploy host itself*, not on
+       your laptop. SSH in once:
+       ```
+       npm install -g @anthropic-ai/claude-code
+       claude /login        # complete OAuth in your local browser
+       ```
+       This writes `~/.claude/.credentials.json` on the remote. On
+       the next `./scripts/deploy.sh`, the deploy seeds those
+       credentials into `~/.notes/claude-config/` (bind-mounted to
+       `/home/appuser/.claude` in the container). The container then
+       owns its own copy and refreshes tokens independently of the
+       host's `~/.claude/`. Subsequent deploys skip the seed step
+       because `.credentials.json` already exists in the target dir.
+       The reason for the host-side login: Claude Code on macOS
+       stores credentials in the system Keychain, not in a file, so
+       rsyncing your local `~/.claude/` to the remote doesn't carry
+       auth state. Doing the OAuth flow on the Linux remote always
+       writes a file.
+    2. **API key** — `export ANTHROPIC_API_KEY=...` in `.envrc.local`.
+       Claude Code in the container picks it up from env. When set,
+       this takes precedence over subscription auth and the seed
+       step is skipped entirely.
+- The container's `appuser` is pinned to uid 1000 so the bind-mounted
+  `~/.notes/claude-config` (owned by uid 1000 on the deploy host) is
+  readable inside the container.
+- `deploy.sh` fails fast if neither auth path is configured (no
+  ANTHROPIC_API_KEY AND no `~/.claude/.credentials.json` on the
+  remote), with a clear error explaining how to fix it.
+- Set `NOTES_EDITOR=mock` ONLY for tests / CI — the mock editor literally
+  pastes the user's instruction onto the page, which will look like
+  "the agent didn't understand what I wanted" if you ever ship it.
 - **Never pass `SKIP_DOCKER_BUILD=1` to `deploy.sh`.** `e2e.sh` builds a
   native-arch image (arm64 on Apple Silicon) for speed, but the remote
   host is linux/amd64. `deploy.sh` *must* rebuild with `--platform
