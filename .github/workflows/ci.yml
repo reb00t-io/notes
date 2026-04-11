@@ -11,6 +11,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: grep '^export ' .envrc | sed -e 's/^export //' -e 's/="\(.*\)"/=\1/' >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install Python deps
+        run: python -m pip install --upgrade pip && python -m pip install -e '.[dev]'
+      - name: pytest
+        run: python -m pytest
       - run: ./scripts/build.sh linux/amd64
       - run: ./test/e2e.sh
         env:
