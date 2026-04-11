@@ -52,6 +52,11 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+  /* Stop iOS from auto-resizing text in landscape, which can drop the
+     effective input font size below 16px and trigger zoom on focus
+     even when the explicit font-size is 16px. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Sign in</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -68,7 +68,8 @@
       padding: 0.625rem 0.875rem;
       border: 1px solid #e2e8f0;
       border-radius: 10px;
-      font-size: 0.9375rem;
+      /* >= 16px to prevent iOS Safari auto-zoom on focus. */
+      font-size: 16px;
       color: #1e293b;
       background: #f8fafc;
       outline: none;

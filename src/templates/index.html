@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <!-- maximum-scale=1.0 + user-scalable=no suppresses iOS Safari's
+       auto-zoom-on-focus behavior on text inputs (the 16px font-size
+       fix isn't always sufficient — landscape and dynamic content can
+       still trigger it). The page-view iframe is a separate document
+       with its own viewport, so users can still pinch-zoom into rendered
+       note content. iOS Accessibility zoom (system gesture) still works. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#0f0f23">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
