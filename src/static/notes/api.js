@@ -51,12 +51,21 @@ export async function latestSession() {
 
 /**
  * POST /v1/responses and stream the SSE body.
- * Yields { type: 'delta', text } for content and returns the session id.
+ * Yields:
+ *   { type: 'delta', text }                  - assistant content chunk
+ *   { type: 'tool_call', id, name, preview } - a tool round is starting
+ *   { type: 'tool_request', ... }            - frontend-side tool call
+ *   { type: 'done', sessionId }              - stream finished
+ *
+ * `openPageId`: when the user is viewing a page in the sheet, pass
+ * the slug here. The backend prepends a context preamble so the agent
+ * knows which page "this page" refers to.
  */
-export async function* streamChat({ prompt, sessionId, toolResults }) {
+export async function* streamChat({ prompt, sessionId, openPageId, toolResults }) {
   const body = {};
   if (prompt) body.prompt = prompt;
   if (sessionId) body.session_id = sessionId;
+  if (openPageId) body.open_page_id = openPageId;
   if (toolResults) body.tool_results = toolResults;
 
   const resp = await fetch('/v1/responses', {
@@ -97,6 +106,8 @@ export async function* streamChat({ prompt, sessionId, toolResults }) {
           const obj = JSON.parse(payload);
           if (obj.choices?.[0]?.delta?.content) {
             yield { type: 'delta', text: obj.choices[0].delta.content };
+          } else if (obj.tool_call) {
+            yield { type: 'tool_call', ...obj.tool_call };
           } else if (obj.tool_request) {
             yield { type: 'tool_request', ...obj.tool_request };
           }

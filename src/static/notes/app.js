@@ -143,8 +143,31 @@ async function send(prompt) {
   sendBtn.disabled = true;
 
   addMsg('user', prompt);
-  const { bubble } = addMsg('assistant', '');
+
+  // The stream may produce multiple assistant bubbles (one per
+  // tool-call round). currentBubble points at the bubble that the
+  // next delta should append to; on a tool_call event we finalize
+  // it, insert a chip, and reset so the next delta opens a fresh
+  // bubble below the chip.
+  let currentBubble = null;
   let text = '';
+
+  function ensureBubble() {
+    if (!currentBubble) {
+      const { bubble } = addMsg('assistant', '');
+      currentBubble = bubble;
+      text = '';
+    }
+  }
+
+  function finalizeBubble() {
+    if (currentBubble) {
+      const rendered = renderMarkdown(text);
+      currentBubble.innerHTML = rendered;
+      maybeAutoLinkPages(text, currentBubble);
+      currentBubble = null;
+    }
+  }
 
   // Show the mini output as soon as a send starts — it's the primary
   // feedback surface when a page is open over the chat.
@@ -152,28 +175,46 @@ async function send(prompt) {
   setMiniOutputContent('', { cursor: true });
 
   try {
-    const stream = api.streamChat({ prompt, sessionId: state.sessionId });
+    const stream = api.streamChat({
+      prompt,
+      sessionId: state.sessionId,
+      openPageId: state.openPageId,
+    });
     for await (const ev of stream) {
       if (ev.type === 'delta') {
+        ensureBubble();
         text += ev.text;
         const rendered = renderMarkdown(text);
-        bubble.innerHTML = rendered + '<span class="cursor"></span>';
+        currentBubble.innerHTML = rendered + '<span class="cursor"></span>';
         chatScroll.scrollTop = chatScroll.scrollHeight;
         setMiniOutputContent(rendered, { cursor: true });
+      } else if (ev.type === 'tool_call') {
+        finalizeBubble();
+        addToolChip(ev.name, ev.preview);
+        setMiniOutputContent(
+          `<em>${escapeText(ev.preview || ev.name)}…</em>`,
+          { cursor: true },
+        );
       } else if (ev.type === 'done') {
         if (ev.sessionId) {
           state.sessionId = ev.sessionId;
           bridge.connect(state.sessionId);
         }
-        const rendered = renderMarkdown(text);
-        bubble.innerHTML = rendered;
-        maybeAutoLinkPages(text, bubble);
-        setMiniOutputContent(rendered, { cursor: false });
+        finalizeBubble();
+        setMiniOutputContent(
+          text ? renderMarkdown(text) : '',
+          { cursor: false },
+        );
       }
     }
   } catch (err) {
     const msg = `<em style="color:var(--danger)">Error: ${err.message}</em>`;
-    bubble.innerHTML = msg;
+    if (currentBubble) {
+      currentBubble.innerHTML = msg;
+    } else {
+      const { bubble } = addMsg('assistant', '');
+      bubble.innerHTML = msg;
+    }
     setMiniOutputContent(msg);
   } finally {
     state.streaming = false;
@@ -181,6 +222,29 @@ async function send(prompt) {
     // Refresh page list in background (edits may have happened)
     loadPages();
   }
+}
+
+// Insert a "tool started" chip in the chat. Used to give the user
+// feedback during slow tool rounds (notably edit_page → claude).
+function addToolChip(name, preview) {
+  if (welcome) welcome.classList.add('hidden');
+  const row = document.createElement('div');
+  row.className = 'msg assistant';
+  const chip = document.createElement('div');
+  chip.className = 'tool-chip';
+  const icon =
+    name === 'edit_page' || name === 'create_page'
+      ? '✨'
+      : name === 'search'
+      ? '🔍'
+      : name && name.startsWith('dom_')
+      ? '👁'
+      : '·';
+  chip.innerHTML = `<span aria-hidden="true">${icon}</span><span></span>`;
+  chip.lastElementChild.textContent = preview || name || 'tool';
+  row.appendChild(chip);
+  chatScroll.appendChild(row);
+  chatScroll.scrollTop = chatScroll.scrollHeight;
 }
 
 // ─── Pages list / drawer ────────────────────────────────────

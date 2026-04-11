@@ -58,8 +58,13 @@ class ClaudeAgent(Agent):
         if not self.no_allowed_tools:
             cmd.extend(["--allowedTools", self.allowed_tools])
 
-        cmd.append(prompt)
-        subprocess.run(cmd, cwd=repo_dir, check=True)
+        # Pipe the prompt via stdin rather than passing it as a
+        # positional argument. Newer versions of `claude -p` reject the
+        # positional form when other flags follow `-p` (the parser
+        # complains: "Input must be provided either through stdin or as
+        # a prompt argument when using --print"). stdin works across
+        # versions and avoids ARG_MAX issues for very long prompts.
+        subprocess.run(cmd, cwd=repo_dir, input=prompt, text=True, check=True)
 
 
 def get_agent(

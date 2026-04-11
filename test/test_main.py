@@ -200,6 +200,39 @@ async def test_tool_schemas_include_page_tools():
     assert "web_search" not in tool_names
 
 
+async def test_open_page_id_prepends_context_to_prompt(client):
+    """When the user is viewing a page in the sheet, the orchestrator
+    should see a context preamble naming that page so it can call
+    edit_page with the right id when the user says "this page"."""
+    with mock_llm(_sse("ok")):
+        resp = await client.post(
+            "/v1/responses",
+            json={
+                "prompt": "add a section about lunch",
+                "open_page_id": "diary",
+            },
+        )
+    assert resp.status_code == 200
+    await _read_sse(resp)
+    sid = resp.headers.get("X-Session-Id")
+    user_msgs = [m for m in sessions[sid] if m.get("role") == "user"]
+    assert len(user_msgs) == 1
+    content = user_msgs[0]["content"]
+    assert "diary" in content
+    assert "diary.html" in content
+    assert "add a section about lunch" in content
+    # The user's actual instruction must still be visible after the
+    # context preamble (not replaced by it).
+    assert content.endswith("add a section about lunch")
+
+
+async def test_open_page_id_no_op_without_prompt(client):
+    """If only open_page_id is sent (no prompt), don't synthesise a
+    user message — empty prompts are still rejected with 400."""
+    resp = await client.post("/v1/responses", json={"open_page_id": "diary"})
+    assert resp.status_code == 400
+
+
 async def test_favicon_returns_svg(client):
     resp = await client.get("/favicon.ico")
     assert resp.status_code == 200

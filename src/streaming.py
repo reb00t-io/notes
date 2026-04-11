@@ -71,6 +71,48 @@ def build_frontend_tool_request(session_id: str, tool_call: dict[str, Any]) -> d
     }
 
 
+def summarize_tool_call(tool_call: dict[str, Any]) -> dict[str, Any]:
+    """Build a small structured summary of a tool call for the
+    frontend's "tool started" chip. The frontend renders this so the
+    user gets feedback during slow tools (notably edit_page → claude)."""
+    fn_name = (tool_call.get("function") or {}).get("name", "") or ""
+    args = _parse_tool_arguments(tool_call) or {}
+
+    def _short(text: str, max_len: int = 60) -> str:
+        text = (text or "").strip().replace("\n", " ")
+        return text if len(text) <= max_len else text[: max_len - 1] + "…"
+
+    if fn_name == "edit_page":
+        preview = f"editing {args.get('page_id', '?')}: {_short(args.get('instruction', ''))}"
+    elif fn_name == "create_page":
+        preview = f"creating page \"{_short(args.get('title', '?'), 40)}\""
+    elif fn_name == "search":
+        preview = f"searching: {_short(args.get('query', ''))}"
+    elif fn_name == "read_page":
+        preview = f"reading {args.get('page_id', '?')}"
+    elif fn_name == "list_pages":
+        q = args.get("query") or args.get("tag") or ""
+        preview = f"listing pages{(' (' + _short(q) + ')') if q else ''}"
+    elif fn_name == "write_data":
+        preview = f"writing {args.get('page_id', '?')}/{args.get('file', '?')}"
+    elif fn_name == "read_data":
+        preview = f"reading {args.get('page_id', '?')}/{args.get('file', '?')}"
+    elif fn_name == "delete_page":
+        preview = f"deleting {args.get('page_id', '?')}"
+    elif fn_name == "delete_data":
+        preview = f"deleting {args.get('page_id', '?')}/{args.get('file', '?')}"
+    elif fn_name == "recent_edits":
+        preview = "recent edits"
+    else:
+        preview = fn_name
+
+    return {
+        "id": tool_call.get("id", ""),
+        "name": fn_name,
+        "preview": preview,
+    }
+
+
 def visible_messages(messages: list[dict]) -> list[dict]:
     visible_roles = {"user", "assistant"}
     return [message for message in messages if message.get("role") in visible_roles and message.get("content")]
@@ -258,6 +300,16 @@ async def generate_stream(
                 frontend_tool_calls, backend_tool_calls = split_frontend_tool_calls(tool_calls)
 
                 if backend_tool_calls:
+                    # Surface "tool started" chips in the chat BEFORE
+                    # running the (potentially slow) tool, so the user
+                    # gets feedback during edit_page → claude (~10s+).
+                    for tc in backend_tool_calls:
+                        yield emit_event(
+                            json.dumps(
+                                {"tool_call": summarize_tool_call(tc)},
+                                separators=(",", ":"),
+                            )
+                        )
                     await execute_backend_tool_round(messages, backend_tool_calls)
 
                 if frontend_tool_calls:

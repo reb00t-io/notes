@@ -395,6 +395,25 @@ async def get_session(session_id: str):
 @app.route("/v1/responses", methods=["POST"])
 async def chat_responses():
     body = await request.get_json(force=True)
+
+    # If the user is currently viewing a page in the sheet, prepend a
+    # context preamble to the prompt so the agent knows which page
+    # "this page" refers to and can call edit_page with the right id.
+    open_page_id = (body.get("open_page_id") or "").strip()
+    prompt = body.get("prompt") or ""
+    if open_page_id and prompt.strip():
+        body = {
+            **body,
+            "prompt": (
+                f"[The user is currently viewing the workspace page "
+                f"`{open_page_id}` (file: `{open_page_id}.html`). "
+                f"When they say \"this page\" or don't name a page, "
+                f"they almost certainly mean this one. If they ask for "
+                f"an edit without specifying a target, call edit_page "
+                f"with page_id=\"{open_page_id}\".]\n\n{prompt}"
+            ),
+        }
+
     # Set the bridge session context so dom_* tools know which tab to talk to
     session_id = body.get("session_id") or ""
     token = current_session_id.set(session_id)
