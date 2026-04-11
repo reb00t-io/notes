@@ -300,7 +300,9 @@ composerInput.addEventListener('input', () => {
 });
 
 composerInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // Plain Enter inserts a newline (default browser behavior).
+  // Only Shift+Enter (or tapping the send button) submits.
+  if (e.key === 'Enter' && e.shiftKey) {
     e.preventDefault();
     submit();
   }
