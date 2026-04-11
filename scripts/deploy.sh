@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Deploy script for bootstrap-template
-# This script handles building, saving, uploading, and starting the Docker container.
-# It also checks the public endpoint and prints diagnostics on failure.
+# Deploy script for the notes workspace.
+# Handles building, saving, uploading, and starting the Docker container.
+# Checks the public endpoint, prints diagnostics on failure, and notifies
+# via scripts/notify.sh on either success or failure.
 
 REMOTE_HOST="test.k3rnel-pan1c.com"
 REMOTE_PORT=2223
 REMOTE_USER="marko"
 IMAGE_NAME="notes"
 REMOTE="$REMOTE_USER@$REMOTE_HOST"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Persistent SSH multiplexed connection — all ssh/scp commands share one TCP
 # session. Force the control dir under /tmp: Unix domain sockets cap at ~104
@@ -20,11 +22,46 @@ SSH_CONTROL_PATH="$SSH_CONTROL_DIR/ctrl-%C"
 SSH_OPTS=(-p "$REMOTE_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=12 -o ControlMaster=auto -o ControlPath="$SSH_CONTROL_PATH" -o ControlPersist=300)
 SCP_OPTS=(-P "$REMOTE_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=12 -o ControlMaster=auto -o ControlPath="$SSH_CONTROL_PATH" -o ControlPersist=300)
 
+# Tracked by the EXIT trap so failure notifications can name the failing
+# step. Updated as the script progresses.
+deploy_step="initialization"
+
 cleanup_ssh() {
   ssh "${SSH_OPTS[@]}" -O exit "$REMOTE" 2>/dev/null || true
   rm -rf "$SSH_CONTROL_DIR"
 }
-trap cleanup_ssh EXIT
+
+notify_deploy_result() {
+  local status="$1"  # "succeeded" or "failed"
+  local short_sha
+  short_sha=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+  local subject
+  if [ "$status" = "succeeded" ]; then
+    subject="✅ **${IMAGE_NAME} deploy succeeded**
+
+url: ${PUBLIC_URL:-?}
+commit: \`${short_sha}\`"
+  else
+    subject="❌ **${IMAGE_NAME} deploy FAILED**
+
+step: ${deploy_step}
+commit: \`${short_sha}\`
+host: ${REMOTE_HOST}"
+  fi
+  "${SCRIPT_DIR}/notify.sh" "$subject" || true
+}
+
+on_exit() {
+  local exit_code=$?
+  if [ "$exit_code" -eq 0 ]; then
+    notify_deploy_result succeeded
+  else
+    notify_deploy_result failed
+  fi
+  cleanup_ssh
+  exit "$exit_code"
+}
+trap on_exit EXIT
 
 # Retry wrapper: retry_cmd <max_attempts> <backoff_secs> <command...>
 retry_cmd() {
@@ -65,6 +102,7 @@ print_remote_diagnostics() {
 }
 
 # ---- build ---------------------------------------------------------------
+deploy_step="build image"
 printf "==> building image (%s, linux/amd64)..." "$IMAGE_NAME"
 if [ "${SKIP_DOCKER_BUILD:-0}" != "1" ]; then
   ./scripts/build.sh linux/amd64 > /dev/null 2>&1
@@ -72,15 +110,18 @@ fi
 echo "ok"
 
 # ---- save & upload image -------------------------------------------------
+deploy_step="save image"
 printf "==> saving image..."
 docker save "$IMAGE_NAME" | gzip > /tmp/"${IMAGE_NAME}".tar.gz
 echo "ok"
 
+deploy_step="upload image to remote"
 printf "==> uploading to %s..." "$REMOTE_HOST"
 retry_cmd 3 2 scp "${SCP_OPTS[@]}" /tmp/"${IMAGE_NAME}".tar.gz "$REMOTE":/tmp/"${IMAGE_NAME}".tar.gz
 rm /tmp/"${IMAGE_NAME}".tar.gz
 echo "ok"
 
+deploy_step="load image on remote"
 printf "==> loading image on remote..."
 ssh "${SSH_OPTS[@]}" "$REMOTE" "
   docker load < /tmp/${IMAGE_NAME}.tar.gz
@@ -89,6 +130,7 @@ ssh "${SSH_OPTS[@]}" "$REMOTE" "
 echo "ok"
 
 # ---- upload compose file -------------------------------------------------
+deploy_step="upload compose file"
 printf "==> uploading compose file..."
 retry_cmd 3 2 ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p ~/${IMAGE_NAME}"
 retry_cmd 3 2 scp "${SCP_OPTS[@]}" docker-compose.yml "$REMOTE":~/"${IMAGE_NAME}"/docker-compose.yml
@@ -102,6 +144,7 @@ echo "ok"
 # which then blocks subsequent non-root chmod/chown. We use sudo to force
 # the dirs to our user and grant broad write perms so the in-container
 # app user (and the qdrant container user) can both write.
+deploy_step="ensure remote data dirs"
 printf "==> ensuring remote data dirs..."
 ensure_dirs_log=$(mktemp)
 if ! ssh "${SSH_OPTS[@]}" "$REMOTE" '
@@ -123,6 +166,7 @@ echo "ok"
 # All values are written through `printf %q` so secrets with quotes / spaces /
 # special characters survive the heredoc. The .env file format docker-compose
 # reads is documented here: https://docs.docker.com/compose/environment-variables/env-file/
+deploy_step="write remote .env"
 printf "==> writing remote .env..."
 printf -v port_q '%q'           "$PORT"
 printf -v llm_base_url_q '%q'   "$LLM_BASE_URL"
@@ -152,6 +196,7 @@ EOF
 echo "ok"
 
 # ---- start services ------------------------------------------------------
+deploy_step="remove stray containers"
 # Remove stray containers that would block `docker compose up`:
 #   1. Any container literally named `${IMAGE_NAME}` that isn't part of
 #      the current compose project.
@@ -183,6 +228,7 @@ ssh "${SSH_OPTS[@]}" "$REMOTE" "
 " 2>/dev/null || true
 echo "ok"
 
+deploy_step="start services"
 printf "==> starting services..."
 compose_up_log=$(mktemp)
 if ! retry_cmd 3 4 ssh "${SSH_OPTS[@]}" "$REMOTE" "
@@ -200,6 +246,7 @@ rm -f "$compose_up_log"
 echo "ok"
 
 # ---- wait for server -----------------------------------------------------
+deploy_step="wait for server"
 printf "==> waiting for server..."
 WAIT_TIMEOUT_SECONDS="${WAIT_TIMEOUT_SECONDS:-120}"
 WAIT_INTERVAL_SECONDS="${WAIT_INTERVAL_SECONDS:-2}"
@@ -225,6 +272,7 @@ fi
 echo "ok"
 
 # ---- public smoke check --------------------------------------------------
+deploy_step="check public endpoint"
 printf "==> checking public endpoint (%s)..." "$PUBLIC_URL"
 if ! body=$(curl -sfL --max-time 10 "$PUBLIC_URL"); then
   echo "FAIL"
