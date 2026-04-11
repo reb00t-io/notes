@@ -58,28 +58,37 @@ All commands listed here must work.
 ## 4. Definition of Done
 
 ### Standard workflow for every change
-Execute in order, do not skip steps:
+Execute in order, do not skip steps. This mirrors §10.
 
-1. **Develop** — implement the change, adding tests alongside it
-2. **Test** — run `pytest` (all 109+ tests must pass)
-3. **End-to-end** — run `PORT=31010 ./test/e2e.sh` (builds the image, starts
-   the compose stack, verifies the server comes up with a fresh deploy date
-   meta tag and the seeded pages are reachable, then tears down)
-4. **Deploy** — run `./scripts/deploy.sh` (requires `PORT`, `PUBLIC_URL`,
+1. **Develop** — implement the change, adding tests alongside it.
+2. **Test** — run `pytest` (all tests must pass).
+3. **End-to-end** — run `PORT=31010 ./test/e2e.sh` (builds the image,
+   starts the compose stack, verifies the server comes up with a fresh
+   deploy date meta tag and the seeded pages are reachable, then tears
+   down).
+4. **Commit to `main`** — always commit straight to main, no branches or
+   PRs for normal work; this repo is single-user.
+5. **Deploy** — run `./scripts/deploy.sh` (requires `PORT`, `PUBLIC_URL`,
    `LLM_BASE_URL`, `LLM_API_KEY`, `API_KEY`, `AUTH_PASSWORD` in the
-   environment; load via `direnv allow` or `source .envrc.local`)
-5. **Commit + push** — always to `main`. No feature branches or PRs for
-   normal work; the repo is single-user and deploys from `main`.
+   environment; load via `direnv allow` or `source .envrc.local`). If
+   deploy reveals issues, fix them and **amend** the existing commit
+   (`git commit --amend`) so the recorded history matches what's in
+   production. Re-run deploy after the amend.
+6. **Push** — only push once deploy succeeds. CI on GitHub re-runs build
+   + e2e on push but does NOT auto-deploy; deploy is strictly manual.
 
-If any step fails, fix it before moving on. Do not commit with failing
-tests. Do not push without a successful deploy.
+If any step fails, fix it before moving on. Do not push commits whose
+deploy has not succeeded — the deployed binary is the source of truth
+for what `main` represents.
 
 ### Per-change checklist
 - [ ] New tests cover the new behavior (unit tests in `test/test_*.py`,
       using `tmp_path` + `monkeypatch`; never touch real `pages/` content)
 - [ ] `pytest` passes
 - [ ] `./test/e2e.sh` passes
-- [ ] `./scripts/deploy.sh` succeeds
+- [ ] Committed to `main` (not pushed yet)
+- [ ] `./scripts/deploy.sh` succeeds (commit amended if any fix was needed)
+- [ ] Pushed to `origin/main`
 - [ ] `docs/spec.md` updated if the behavior deviates from it
 - [ ] Commit message explains the "why"
 - [ ] No edits to `pages/` content as a side effect of the code change
@@ -172,4 +181,10 @@ Things that are easy to break:
 ## 10. Pull Requests & Branching
 Default branch: main
 
-When a PR is requested, create a branch `agent/<branch_name>` and create a PR from there using `gh`.
+Workflow to follow:
+1. code changes
+2. run tests
+3. run test/e2e.sh
+4. commit to main
+5. run scripts/deploy.sh (amend the commit with fixes)
+6. push
