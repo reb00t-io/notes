@@ -37,16 +37,9 @@ notify_deploy_result() {
   short_sha=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
   local subject
   if [ "$status" = "succeeded" ]; then
-    subject="✅ **${IMAGE_NAME} deploy succeeded**
-
-url: ${PUBLIC_URL:-?}
-commit: \`${short_sha}\`"
+    subject="✅ ${IMAGE_NAME}: deployed ${short_sha}"
   else
-    subject="❌ **${IMAGE_NAME} deploy FAILED**
-
-step: ${deploy_step}
-commit: \`${short_sha}\`
-host: ${REMOTE_HOST}"
+    subject="❌ ${IMAGE_NAME}: deploy FAILED at \`${deploy_step}\` (${short_sha})"
   fi
   "${SCRIPT_DIR}/notify.sh" "$subject" || true
 }
