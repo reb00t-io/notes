@@ -1,10 +1,10 @@
-"""Tests for src/main.py — the notes backend entry point.
+"""Tests for src/main.py — the workspace backend entry point.
 
 Covers:
 - /v1/responses streams a response and persists the session
 - /v1/sessions/latest returns the most recent session
 - Auth gating when API_KEY is set
-- The system prompt is loaded from the notes agent
+- The system prompt is loaded from the workspace agent
 """
 from __future__ import annotations
 

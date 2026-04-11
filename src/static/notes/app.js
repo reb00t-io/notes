@@ -398,5 +398,5 @@ micBtn.addEventListener('click', toggleVoice);
     console.warn('latest session failed', err);
   }
   loadPages();
-  console.info('notes app ready');
+  console.info('Notes workspace ready');
 })();

@@ -1,11 +1,12 @@
-"""Orchestrator tool schemas + handlers for the notes agent.
+"""Orchestrator tool schemas + handlers for the workspace agent.
 
 The tool schemas are the OpenAI function-calling format, which the existing
 /v1/responses flow passes straight through to the LLM. Handlers are bound at
 startup via `make_handlers(ctx)` and registered with the tool_executor.
 
 Design notes:
-- edit_page is the only HTML-mutating tool. It delegates to Claude Code.
+- edit_page is the only HTML-mutating tool. It delegates to the editor
+  layer (Claude Code locally, LLM in production).
 - read_data returns text for text files, base64 for binary.
 - search wraps the Qdrant hybrid search. If no qdrant client is present the
   tool returns an empty result set with an explanation.
@@ -54,7 +55,7 @@ def _fn(name: str, description: str, properties: dict, required: list[str]) -> d
 NOTES_TOOL_SCHEMAS: list[dict] = [
     _fn(
         "list_pages",
-        "List pages in the user's notebook, most recently updated first.",
+        "List pages in the workspace, most recently updated first. Pages can be docs, wikis, trackers, dashboards, journals — anything the user has built.",
         {
             "query": {"type": "string", "description": "Optional case-insensitive title substring filter."},
             "tag": {"type": "string", "description": "Optional tag filter."},
@@ -64,13 +65,13 @@ NOTES_TOOL_SCHEMAS: list[dict] = [
     ),
     _fn(
         "read_page",
-        "Read a page by id. Returns title, tags, section index, full HTML, and attached data files.",
+        "Read a workspace page by id. Returns title, tags, section index, full HTML, and attached data files.",
         {"page_id": {"type": "string", "description": "The page slug."}},
         ["page_id"],
     ),
     _fn(
         "search",
-        "Hybrid BM25+vector search across all pages. Returns the most relevant sections as snippets.",
+        "Hybrid BM25+vector search across the entire workspace. Returns the most relevant sections from across all pages as snippets.",
         {
             "query": {"type": "string"},
             "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 8},
@@ -80,17 +81,17 @@ NOTES_TOOL_SCHEMAS: list[dict] = [
     ),
     _fn(
         "create_page",
-        "Create a new page with a title and a natural-language instruction describing what the page should contain. Claude Code writes the initial HTML.",
+        "Create a new workspace page from a title and a natural-language instruction. The instruction should describe what the page IS (a project tracker, design doc, dashboard, comparison table, …) and what it should contain. The HTML editor writes the initial markup.",
         {
             "title": {"type": "string"},
-            "instruction": {"type": "string", "description": "What the page should contain."},
+            "instruction": {"type": "string", "description": "What kind of artifact the page is and what it should contain."},
             "tags": {"type": "array", "items": {"type": "string"}},
         },
         ["title", "instruction"],
     ),
     _fn(
         "edit_page",
-        "Edit an existing page with a natural-language instruction. Claude Code performs the actual HTML edit.",
+        "Edit an existing workspace page with a natural-language instruction. The HTML editor performs the actual change. Use this for adding sections, updating data, restructuring layout, adding charts that reference attached data files, and any other content change.",
         {
             "page_id": {"type": "string"},
             "instruction": {"type": "string", "description": "What should change on this page."},
@@ -99,13 +100,13 @@ NOTES_TOOL_SCHEMAS: list[dict] = [
     ),
     _fn(
         "delete_page",
-        "Delete a page and its attached data files.",
+        "Delete a workspace page and its attached data files.",
         {"page_id": {"type": "string"}},
         ["page_id"],
     ),
     _fn(
         "list_data",
-        "List data files attached to a page.",
+        "List data files (CSV / JSON / images / etc.) attached to a page.",
         {"page_id": {"type": "string"}},
         ["page_id"],
     ),
@@ -120,7 +121,7 @@ NOTES_TOOL_SCHEMAS: list[dict] = [
     ),
     _fn(
         "write_data",
-        "Create or overwrite a data file attached to a page. Use `content` for text files and `content_base64` for binary. Max 10 MB.",
+        "Create or overwrite a data file attached to a page. Use `content` for text files (CSV/JSON/TXT/MD/SVG) and `content_base64` for binary (PNG/JPG/WEBP). Max 10 MB. Pair this with `edit_page` to add a chart or table that fetches the data.",
         {
             "page_id": {"type": "string"},
             "file": {"type": "string"},
@@ -140,7 +141,7 @@ NOTES_TOOL_SCHEMAS: list[dict] = [
     ),
     _fn(
         "recent_edits",
-        "Return recent edit history (git commits on the pages repo).",
+        "Return recent edit history across the workspace (git commits on the pages repo).",
         {"limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10}},
         [],
     ),

@@ -18,34 +18,60 @@ logger = logging.getLogger(__name__)
 
 WELCOME_HTML = """\
 <section>
-  <h1>Welcome to your notebook</h1>
+  <h1>Welcome to your workspace</h1>
   <p>
-    This is a different kind of notes app. There are no fixed structures,
-    no templates, no block types. Every page is just HTML that grows over
-    time as you talk to the assistant in the chat panel.
+    This is an AI-native alternative to Notion, Confluence, and Loop.
+    There are no block libraries, no templates to pick from, and no
+    fixed schemas. You describe what you want; the assistant builds it.
   </p>
   <p>
-    Try saying things like:
+    Every page is just HTML that grows over time as you talk to the
+    assistant in the chat panel. Pages can be anything &mdash; they are
+    not limited to notes:
   </p>
   <ul>
-    <li><em>&ldquo;Add a page about my current reading list and include
-      the three books I mentioned last week.&rdquo;</em></li>
-    <li><em>&ldquo;What did I write about postgres locks?&rdquo;</em></li>
-    <li><em>&ldquo;Turn this page into a table grouped by project.&rdquo;</em></li>
-    <li><em>&ldquo;Chart the numbers in sales.csv as a bar chart.&rdquo;</em></li>
+    <li>meeting notes, decision logs, retros</li>
+    <li>project trackers, OKRs, weekly reviews</li>
+    <li>technical design docs, runbooks, postmortems</li>
+    <li>team wikis and onboarding guides</li>
+    <li>reading lists, learning trackers, watch lists</li>
+    <li>dashboards with inline charts that read attached data files</li>
+    <li>comparison tables, scorecards, feature matrices</li>
+    <li>journals, gratitude lists, habit trackers</li>
+  </ul>
+  <p>
+    You don&rsquo;t pick a &ldquo;type&rdquo; before writing. You just
+    tell the assistant what you want, and the right structure appears.
+  </p>
+</section>
+<section>
+  <h2>Try saying things like</h2>
+  <ul>
+    <li><em>&ldquo;Create a project tracker for our Q2 launches with
+      columns Status, Owner, and Due.&rdquo;</em></li>
+    <li><em>&ldquo;Start a design doc for the new auth flow with
+      Background, Goals, Non-goals, and Plan sections.&rdquo;</em></li>
+    <li><em>&ldquo;Add a reading list page and include the three books I
+      mentioned last week.&rdquo;</em></li>
+    <li><em>&ldquo;What did I decide about postgres locks?&rdquo;</em></li>
+    <li><em>&ldquo;Turn this page into a table grouped by
+      project.&rdquo;</em></li>
+    <li><em>&ldquo;Chart the numbers in sales.csv as a bar
+      chart.&rdquo;</em></li>
   </ul>
 </section>
 <section>
   <h2>How it works</h2>
   <p>
-    When you ask for a change, the assistant invokes Claude Code under the
-    hood to make a minimal, targeted edit to the page file. Every edit is
-    committed to git, so undo is just &ldquo;revert the last change.&rdquo;
+    When you ask for a change, the assistant invokes an HTML editor
+    under the hood to make a minimal, targeted edit to the page. Every
+    edit is committed to git, so undo is just &ldquo;revert the last
+    change.&rdquo;
   </p>
   <p>
-    Your notes live as HTML files on disk. Nothing is trapped in a
-    proprietary format &mdash; you can open them with any browser, edit them
-    with any editor, or rsync them to another machine.
+    Your workspace lives as HTML files on disk. Nothing is trapped in a
+    proprietary format &mdash; you can open them with any browser, edit
+    them with any editor, or rsync them to another machine.
   </p>
 </section>
 <section>
@@ -53,8 +79,8 @@ WELCOME_HTML = """\
   <p>
     When a page has associated data (a CSV of numbers, a JSON config, an
     image), it&rsquo;s stored alongside the page in a sibling directory.
-    The assistant can read and write those files and generate
-    visualisations that fetch from them.
+    The assistant can read and write those files and build dashboards or
+    visualisations that fetch from them in real time.
   </p>
 </section>
 """
@@ -64,7 +90,9 @@ GETTING_STARTED_HTML = """\
 <section>
   <h1>Getting started</h1>
   <p>
-    Here are a few concrete ways to use this notebook today.
+    A few concrete ways to use this workspace today. Pick whichever
+    matches what you actually need to do right now &mdash; the assistant
+    handles the structure.
   </p>
 </section>
 <section>
@@ -76,28 +104,48 @@ GETTING_STARTED_HTML = """\
   </p>
 </section>
 <section>
-  <h2>2. Ask a question about your notes</h2>
+  <h2>2. Build a structured artifact</h2>
+  <p>
+    Ask for a project tracker, a design doc, a comparison table, or a
+    decision log. Describe what columns or sections you want and the
+    assistant will lay it out:
+    <em>&ldquo;Create a project tracker for the website redesign with
+    columns Task, Owner, Status, Due.&rdquo;</em>
+  </p>
+</section>
+<section>
+  <h2>3. Ask a question across your workspace</h2>
   <p>
     Ask <em>&ldquo;what did I learn about X?&rdquo;</em> or
-    <em>&ldquo;where did I write about Y?&rdquo;</em>. The assistant
-    searches across your whole notebook using hybrid BM25 + semantic
-    search and synthesises an answer grounded in what you actually wrote.
+    <em>&ldquo;where did I decide on Y?&rdquo;</em>. The assistant
+    searches across every page using hybrid BM25 + semantic search and
+    synthesises an answer grounded in what you actually wrote, with
+    links to the source pages.
   </p>
 </section>
 <section>
-  <h2>3. Restructure a messy page</h2>
+  <h2>4. Restructure a messy page</h2>
   <p>
-    When a page gets long and disorganised, ask the assistant to clean it
-    up: <em>&ldquo;group these bullets by project and make a table for the
-    deadlines.&rdquo;</em>
+    When a page gets long and disorganised, ask the assistant to clean
+    it up: <em>&ldquo;group these bullets by project and make a table
+    for the deadlines.&rdquo;</em>
   </p>
 </section>
 <section>
-  <h2>4. Chart some data</h2>
+  <h2>5. Build a dashboard from data</h2>
   <p>
     Paste a CSV into the chat, or upload it, and ask for a chart. The
     assistant stores the file alongside the page and adds an inline
-    visualisation you can iterate on.
+    visualisation you can iterate on. See the <strong>chart
+    example</strong> page for a working demo.
+  </p>
+</section>
+<section>
+  <h2>6. Connect pages into a wiki</h2>
+  <p>
+    As your workspace grows, ask the assistant to add cross-references
+    between related pages. Over time, your collection becomes a
+    connected web of knowledge instead of a flat list of files.
   </p>
 </section>
 """
@@ -105,11 +153,13 @@ GETTING_STARTED_HTML = """\
 
 CHART_EXAMPLE_HTML = """\
 <section>
-  <h1>Example: charting a CSV</h1>
+  <h1>Example: a small dashboard</h1>
   <p>
     This page demonstrates the data-alongside-pages pattern. The CSV
     lives in <code>chart-example.data/sales.csv</code> and a small inline
-    script fetches it and renders a bar chart.
+    script fetches it and renders a bar chart. Any page in your
+    workspace can become a dashboard like this &mdash; just attach data
+    and ask the assistant to chart it.
   </p>
 </section>
 <section>
@@ -175,6 +225,51 @@ Q3,670
 """
 
 
+PROJECT_TRACKER_HTML = """\
+<section>
+  <h1>Example: a project tracker</h1>
+  <p>
+    Pages in this workspace are not just prose. This one is a small
+    project tracker built entirely as HTML &mdash; ask the assistant to
+    add a row, change a status, or split it by owner and the table
+    updates in place.
+  </p>
+</section>
+<section>
+  <h2>Q2 launches</h2>
+  <table>
+    <thead>
+      <tr><th>Project</th><th>Owner</th><th>Status</th><th>Due</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Mobile redesign</td><td>Alex</td><td>In progress</td><td>2026-05-15</td></tr>
+      <tr><td>Auth migration</td><td>Sam</td><td>Blocked on legal review</td><td>2026-04-30</td></tr>
+      <tr><td>Onboarding revamp</td><td>Priya</td><td>Not started</td><td>2026-06-01</td></tr>
+      <tr><td>Pricing experiment</td><td>Jordan</td><td>Done</td><td>2026-04-08</td></tr>
+    </tbody>
+  </table>
+</section>
+<section>
+  <h2>Try it</h2>
+  <p>
+    Open the chat and try things like:
+  </p>
+  <ul>
+    <li><em>&ldquo;Mark the auth migration as Done.&rdquo;</em></li>
+    <li><em>&ldquo;Add a row for the analytics rebuild, owned by Sam,
+      not started, due July 1.&rdquo;</em></li>
+    <li><em>&ldquo;Group this by owner instead of being one big
+      table.&rdquo;</em></li>
+    <li><em>&ldquo;Add a Notes column.&rdquo;</em></li>
+  </ul>
+  <p>
+    The assistant edits this HTML page directly. There&rsquo;s no
+    database behind the table &mdash; the table <em>is</em> the data.
+  </p>
+</section>
+"""
+
+
 def maybe_seed(store: PageStore) -> list[str]:
     """Seed the store if empty. Returns the list of created page ids."""
     existing = list(store.pages_dir.glob("*.html"))
@@ -202,17 +297,26 @@ def maybe_seed(store: PageStore) -> list[str]:
     created.append("getting-started")
 
     store.create(
-        title="Example: charting a CSV",
+        title="Example: a small dashboard",
         body_html=CHART_EXAMPLE_HTML,
-        tags=["example", "data"],
+        tags=["example", "data", "dashboard"],
         slug="chart-example",
-        commit_message="seed: chart example",
+        commit_message="seed: dashboard example",
     )
     # Attach the sample CSV
     data_dir = store.pages_dir / "chart-example.data"
     data_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / "sales.csv").write_text(SALES_CSV, encoding="utf-8")
-    store._commit("seed: chart example data", subject="seed: chart example data")
+    store._commit("seed: dashboard example data", subject="seed: dashboard example data")
     created.append("chart-example")
+
+    store.create(
+        title="Example: a project tracker",
+        body_html=PROJECT_TRACKER_HTML,
+        tags=["example", "tracker"],
+        slug="project-tracker",
+        commit_message="seed: project tracker example",
+    )
+    created.append("project-tracker")
 
     return created

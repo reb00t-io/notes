@@ -1,4 +1,4 @@
-"""Notes — AI-native note-taking app.
+"""Notes — AI-native workspace (Notion / Confluence / Loop alternative).
 
 Entry point. Wires the product agent, HTTP routes, client bridge WebSocket,
 and serves the mobile-first frontend from templates/index.html.
@@ -304,7 +304,7 @@ if notes_agent is not None:
     register_tool_handler(handle_bridge_tool)
     SYSTEM_PROMPT = notes_agent.system_prompt
 else:
-    SYSTEM_PROMPT = "You are the notes assistant. (Agent build failed; limited mode.)"
+    SYSTEM_PROMPT = "You are the workspace assistant. (Agent build failed; limited mode.)"
 
 
 def _load_system_prompt(_mode: str) -> str:

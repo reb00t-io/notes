@@ -439,7 +439,7 @@ a:hover { text-decoration: underline; }
 .mini-output-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
 
 .mini-output-body.empty::before {
-  content: "Ask anything — the answer will stream here.";
+  content: "Ask or build something — the answer streams here.";
   color: var(--text-dim);
 }
 

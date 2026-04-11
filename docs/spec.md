@@ -8,30 +8,33 @@ This document is the source of truth for the product vision, architecture, and n
 
 ## 1. Vision
 
-A note-taking and knowledge-management app where the primary interaction is **conversation with an embedded agent**, and the substrate is **persisted HTML** that grows over time like a personal website.
+An **AI-native workspace** — Notion / Confluence / Loop, but built by talking instead of by dragging blocks. The primary interaction is **conversation with an embedded agent**; the substrate is **persisted HTML** that grows over time into a structured, queryable workspace.
+
+The workspace is *not* limited to "notes." Pages can be docs, wikis, project trackers, dashboards, decision logs, design docs, comparison tables, runbooks, journals, structured records, or any other artifact a user can describe in a sentence. There is no fixed schema and no block library; the agent builds the right HTML structure for each request.
 
 ### 1.1 Core beliefs
 
-1. **Structure is friction.** Notion's templates, databases, and block types are powerful but slow. The cost of "set up the right structure" is paid by every user, every time.
-2. **HTML is the right substrate.** Universal, styleable, LLMs are excellent at generating it, browsers render it for free, it diffs in git.
-3. **The agent should know everything you've written.** Retrieval over your full corpus on every interaction is now cheap enough to be the default.
+1. **Structure is friction.** Notion's block types, templates, and databases are powerful but slow. The cost of "set up the right structure" is paid by every user, every time. Have the agent build the structure on demand instead.
+2. **HTML is the right substrate.** Universal, styleable, LLMs are excellent at generating it, browsers render it for free, it diffs in git, and a single HTML page can be a doc, a table, a dashboard, or all three at once.
+3. **The agent should know the entire workspace.** Retrieval over the full corpus on every interaction is now cheap enough to be the default.
 4. **Talking is faster than typing — eventually.** Direct editing remains the escape hatch, but the default path is "describe the change."
-5. **Mobile is where notes happen.** Desktop is secondary.
+5. **Mobile is where capture happens.** Desktop is secondary.
 
 ### 1.2 Non-goals (for v1)
 
 - Real-time multi-user collaboration (single-user, multi-device sync only)
 - A block-based WYSIWYG editor competing with Notion on its own terms
 - Plugin marketplace, integrations directory, "no-code" app builder
-- Replacing IDEs, project management, or spreadsheet apps
+- Replacing IDEs, full project management suites, or spreadsheet apps
 
 ### 1.3 What "done" looks like for v1
 
 A user can, on their phone:
-- Open the app, see a list of recent pages
+- Open the app, see a list of recent workspace pages
+- Say "create a project tracker for the website redesign with columns Task, Owner, Status, Due" → a new page with the tracker table appears
 - Say "add to today's standup that I unblocked the deploy" → the right page is found or created and the entry appears
-- Ask "what did I learn last week about postgres locks?" → get a synthesized answer with links into the source pages
-- Ask "make me a dashboard from my last 10 standup notes" → a new page is generated and persisted
+- Ask "what did I decide last week about postgres locks?" → get a synthesised answer with links into the source pages
+- Ask "make me a dashboard from the sales numbers I uploaded yesterday" → a new page with an inline chart is generated and persisted
 - Edit a page directly when faster than describing the change
 
 ---
@@ -82,7 +85,7 @@ pages/
 
 **Scope limits.**
 - Data files are per-page. There is no shared / global data store in v1. If the user wants a file referenced from two pages, it lives on one page and the other page links to it.
-- Size cap per file: 10 MB. Larger binaries are rejected; this is a note-taking app, not a file host.
+- Size cap per file: 10 MB. Larger binaries are rejected; this is a workspace, not a file host.
 - Binary types allowed: images (png/jpg/webp/svg), csv, json, txt, md. Everything else is rejected at the `write_data` boundary.
 
 ### 2.4 The corpus
@@ -103,7 +106,7 @@ There is **exactly one agent**. It is neither a "user-mode helper" nor a full "d
 **What the agent CANNOT do:**
 - Modify the core system: backend code, the SvelteKit frontend, the agent's own tools, the build, the deploy pipeline, dependencies, configuration. Anything under `src/`, `frontend/`, `Dockerfile`, `pyproject.toml`, etc. is off-limits.
 - Run shell commands, install packages, or touch the filesystem outside `pages/`
-- Edit files unrelated to the user's notes
+- Edit files unrelated to the user's workspace
 
 **Why one agent, not two:** the existing scaffold has separate `user` and `dev` modes. For this product that split is wrong. Pure user mode is too weak (it can't actually change anything), full dev mode is too dangerous (it can break the app). The right shape is a single agent that owns the content layer end-to-end, with the same kind of tools a developer would have — but scoped to pages, not code.
 

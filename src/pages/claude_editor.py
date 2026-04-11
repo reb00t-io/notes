@@ -58,7 +58,12 @@ def set_editor_fn(fn: Optional[Callable[[Path, str, dict], None]]) -> None:
 
 
 EDIT_PROMPT_TEMPLATE = """\
-You are editing a single HTML page in the user's notes.
+You are editing a single HTML page in the user's AI-native workspace.
+The workspace is like Notion or Confluence — pages can be docs, wikis,
+project trackers, dashboards, decision logs, comparison tables,
+journals, or any structured artifact built from HTML + CSS + small
+inline scripts. There is no fixed schema; build whatever the
+instruction describes.
 
 TARGET FILE (only this file may be modified): {filename}
 
@@ -170,9 +175,16 @@ def _mock_edit(page_path: Path, instruction: str, context: dict) -> None:
 
 
 LLM_EDIT_SYSTEM_PROMPT = """\
-You are an HTML page editor. You receive the current HTML of a single \
+You are an HTML page editor for an AI-native workspace (think Notion / \
+Confluence / Loop). You receive the current HTML of a single workspace \
 page and an instruction describing what to change. You output the \
 COMPLETE new HTML for the page after applying the change.
+
+Pages in this workspace are not just notes — they can be docs, wikis,
+project trackers, dashboards with inline charts, comparison tables,
+decision logs, journals, runbooks, design docs, or any structured
+artifact made from HTML + CSS + small inline scripts. There is no fixed
+schema. Build whatever the instruction describes.
 
 Hard rules:
 - Output ONLY the raw HTML. No commentary, no explanation, no markdown
@@ -191,6 +203,10 @@ Hard rules:
   and <body>.
 - Reference data files by relative URLs like
   `/v1/pages/<page_id>/data/<filename>` — they are already attached.
+- For structured content (tables, lists, trackers, dashboards), pick
+  the right HTML primitive for the job: <table> for tabular data,
+  <ul>/<ol> for lists, <details>/<summary> for collapsible sections,
+  <canvas> + inline <script> for charts that read attached data files.
 """
 
 

@@ -2,7 +2,7 @@
 
 ## 1. Mission & Priorities
 **Role of the agent in this repository:**
-- This repo is an AI-native notes app: the product agent manages HTML pages for end users. When working in this repo as a developer, an agent helps extend the backend (Python/Quart), the Qdrant-backed search layer, the Claude-Code-driven editor, and the vanilla JS frontend. Agents MUST NOT modify the end-user `pages/` content during development work unless explicitly asked.
+- This repo is an **AI-native workspace** — a Notion / Confluence / Loop alternative where the user builds docs, wikis, project trackers, dashboards, decision logs, comparison tables, design docs, journals, and any other structured artifact by talking to a single product agent. Pages are HTML files managed via the page store, search index, and editor layer. When working in this repo as a developer, an agent helps extend the backend (Python/Quart), the Qdrant-backed search layer, the editor layer (Claude Code locally / LLM in production), and the vanilla JS frontend. Agents MUST NOT modify the end-user `pages/` content during development work unless explicitly asked.
 
 **Decision priority order:**
 - correctness > safety (data integrity, git history) > maintainability > mobile UX quality > performance > speed
